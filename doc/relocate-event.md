@@ -56,3 +56,19 @@ Origin Origin/20220208101704.923884.127727
 With an RMS of less than 1 second this solution is publishable as
 is. It is a significant improvement over the previous solution with
 an RMS more than twice as large and fewer picks.
+
+In the `scolv` GUI the result looks as follows:
+
+List of origins for event [gfz2022cseq](http://geofon.gfz-potsdam.de/eqinfo/event.php?id=gfz2022cseq):
+
+![Screenshot from SeisComP scolv: list of origins for event gfz2022cseq](images/dl-reloc-scolv-1.png)
+
+
+Latest `scautoloc` origin (computed using picks from `scautopick`) for event [gfz2022cseq](http://geofon.gfz-potsdam.de/eqinfo/event.php?id=gfz2022cseq):
+
+![Screenshot from SeisComP scolv: latest scautoloc origin for event gfz2022cseq](images/dl-reloc-scolv-2-autoloc.png)
+
+
+Origin relocated using DL picks for event [gfz2022cseq](http://geofon.gfz-potsdam.de/eqinfo/event.php?id=gfz2022cseq):
+
+![Screenshot from SeisComP scolv: origin relocated using DL picks for event gfz2022cseq](images/dl-reloc-scolv-2-dl-relocated.png)
