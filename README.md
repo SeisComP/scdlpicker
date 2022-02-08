@@ -45,7 +45,7 @@ You need to have installed SeisBench previously.
 
 ## Authors & Acknowlegements
 
-The DL repicker was written by Joachim Saul <saul@gfz-potsdam.de> and Thomas Bornstein. The software depends heavily on SeisBench, which was written by Jannes Münchmeyer and Jack Wollam.
+The DL repicker was written by [Joachim Saul](saul@gfz-potsdam.de) and Thomas Bornstein. The software depends heavily on SeisBench, which was written by Jannes Münchmeyer and Jack Wollam.
 
 
 Reference publications for SeisBench:

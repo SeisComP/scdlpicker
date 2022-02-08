@@ -113,15 +113,15 @@ class Repicker(ABC):
         device(str): Defines where to run the model - "cpu" or "gpu"
     """
 
-    def __init__(self, workingDir=".", eventRootDir="events", spoolDir="spool", test=False, batchSize=False, device="cpu",
+    def __init__(self, workingDir=".", eventRootDir="events", spoolDir="spool", test=False, exit=False, batchSize=False, device="cpu",
                  minConfidence=0.3, annotDir="annot"):
 
         self.test = test
+        self.exit = exit
         self.workingDir = workingDir
         self.eventRootDir = eventRootDir
         self.spoolDir = spoolDir
         self.batchSize = batchSize
-        self.stopped = False
         self.workspaces = dict()
         self.minConfidence = minConfidence
         self.annotDir = annotDir
@@ -371,7 +371,7 @@ class Repicker(ABC):
             # so the eventID is always at a fixed position in the
             # path. This is required.
             assert target.endswith(".yaml")
-            assert target.split("/")[-3] == self.eventRootDir
+#           assert target.split("/")[-3] == self.eventRootDir
             eventID = target.split("/")[-2]
 
             streamIDs = []
@@ -445,9 +445,16 @@ class Repicker(ABC):
     def run(self):
         """Main loop"""
 
-        while not self.stopped:
+        while True:
             self._poll()
             time.sleep(1)
+
+            if self.exit:
+                logger.info("+++exit mode - exiting")
+                break
+
+        return True
+
 
     def _ml_predict(self, adhoc_picks, eventID):
         """ Takes a list of AdHocPicks, repicks them, fills a dictionary with those predictions,
@@ -613,10 +620,11 @@ MODEL_MAP = {
 }
 
 
-def main(model, bs, t, dev, wkdir, evdir, spdir, andir, ds, conf):
+def main(model, bs, t, e, dev, wkdir, evdir, spdir, andir, ds, conf):
     repicker = MODEL_MAP[model](
         dataset=ds,
         test=t,
+        exit=e,
         batchSize=bs,
         workingDir=wkdir,
         eventRootDir=evdir,
@@ -639,6 +647,8 @@ if __name__ == '__main__':
                              f"files manually.")
     parser.add_argument('--test', action='store_true',
                         help='Prevents the repicker from writing out outgoing yaml with refined picks.')
+    parser.add_argument('--exit', action='store_true',
+                        help='Exit after items in spool folder have been processed')
     parser.add_argument('--bs', '--batch-size', action='store_const', const=50, default=50, dest='batchSize',
                         help="Choose a batch size that is suitable for the machine you are working on. Defaults to 50.")
     parser.add_argument('--device', choices=['cpu', 'gpu'], default='cpu',
@@ -671,6 +681,7 @@ if __name__ == '__main__':
         args.model,
         bs=args.batchSize,
         t=args.test,
+        e=args.exit,
         dev=args.device,
         wkdir=args.workingDir,
         evdir=args.eventRootDir,
