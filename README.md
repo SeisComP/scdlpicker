@@ -1,17 +1,16 @@
 # scdlpicker
+
 SeisComP/SeisBench interface to enable deep-learning (re)picking in SeisComP
 
-This is a simple deep learning repicker for SeisComP based on
-SeisBench.
 
-Right now, DL-Repicker performs repicking of previously located
-events. In other words, it looks for picks at known or estimated
-times in seismograms and tries to determine accurate arrival times
-or even detect new arrivals. It does *not* work on continuous
-streams.
+## Objective
+
+This is a simple deep learning (DL) repicker module for SeisComP based on SeisBench.
+
+Right now, the DL repicker module performs repicking of previously located events. In other words, it looks for picks at known or estimated times in seismograms and tries to determine accurate arrival times or even detect new arrivals. It does *not* work on continuous streams.
 
 
-DL-Repicker was written in Python and consists of three modules:
+The DL repicker is written in Python and consists of three modules:
 
 * `scdlpicker.client.py`
 
@@ -23,7 +22,7 @@ This is the actual repicker. Whenever the SeisComP client writes out a new YAML 
 
 * `scdlpicker.relocate-event.py`
 
-A simple SeisComP relocator for SeisComP. For a given event location it simply reads DL picks from the database and attempts to obtain a reasonable event location, which is then sent to the SeisComP system.
+A simple relocator for SeisComP, to be used on the command line. For a given event location it simply reads DL picks from the database and attempts to obtain a reasonable event location, which is then sent to the SeisComP system. It is planned to fully automate this relocation by either running `scdlpicker.relocate-event.py` continuously or extending `scautoloc` to be able to properly process DL picks. Or both.
 
 
 ## Requirements
@@ -32,9 +31,11 @@ A simple SeisComP relocator for SeisComP. For a given event location it simply r
 - [SeisBench](https://github.com/seisbench)
 - [ObsPy](http://obspy.org)
 
+
 ## Build requirements
 - python3-setuptools
 - python3-distutils-extra
+
 
 ## Installation
 To install, you simply run `python setup.py install`. Note: there is no uninstall script.
@@ -44,9 +45,8 @@ You need to have installed SeisBench previously.
 
 ## Authors & Acknowlegements
 
-DL-Repicker was written by Joachim Saul <saul@gfz-potsdam.de> and
-Thomas Bornstein. The software depends heavily on SeisBench,
-which was written by Jannes Münchmeyer and Jack Wollam.
+The DL repicker was written by Joachim Saul <saul@gfz-potsdam.de> and Thomas Bornstein. The software depends heavily on SeisBench, which was written by Jannes Münchmeyer and Jack Wollam.
+
 
 Reference publications for SeisBench:
 
