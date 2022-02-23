@@ -74,19 +74,14 @@ ignoredAgencyIDs = []
 # We normally never process empty origins. However, we may receive
 # origins from other agencies that come without arrivals. We usually
 # consider these trustworthy agencies and for such origins we do
-# want to look for matching picks.
-emptyOriginAgencyIDs = ["NEIC"]
+# want to search for matching, previously missed picks.
+emptyOriginAgencyIDs = ["EMSC", "BGR", "NEIC", "BMKG"]
 
 # We can look for unpicked arrivals at additional stations.
 tryUpickedStations = True
 
-
 # We need a more convenient config for that:
 netstaBlackList = [
-# stations that for some reason ObsPy+SeisComP cannot process
-#   ("GE", "MORC"),
-#   ("CZ", "JAVC"),
-#   ("CZ", "KRUC"),
 # bad components
     ("WA", "ZON"),
 ]
@@ -120,13 +115,19 @@ def manual(obj):
 def alreadyRepicked(pick):
     if pick.publicID().endswith("/repicked"):
         return True
+
+    try:
+        if pick.methodID() == "DL":
+            return True
+    except (AttributeError, ValueError):
+        pass
+
     try:
         if pick.creationInfo().author() == author:
             return True
-    except AttributeError:
+    except (AttributeError, ValueError):
         pass
-    except ValueError:
-        pass
+
     return False
 
 
@@ -202,19 +203,16 @@ class OriginStreamApp(seiscomp.client.Application):
             self.eventRootDir = self.configGetString("mlpicker.eventRootDir")
         except RuntimeError:
             self.eventRootDir = None
-#           self.eventRootDir = os.path.join(self.workingDir, "events")
 
         try:
             self.spoolDir = self.configGetString("mlpicker.spoolDir")
         except RuntimeError:
             self.spoolDir = None
-#           self.spoolDir = os.path.join(self.workingDir, "spool")
 
         try:
             self.outgoingDir = self.configGetString("mlpicker.outgoingDir")
         except RuntimeError:
             self.outgoingDir = None
-#           self.outgoingDir = os.path.join(self.workingDir, "outgoing")
 
         try:
             self.sentDir = self.configGetString("mlpicker.sentDir")
@@ -255,12 +253,6 @@ class OriginStreamApp(seiscomp.client.Application):
         info("ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
         info("emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
         info("tryUpickedStations = " + str(self.tryUpickedStations))
-
-
-    def writeIniFile(self, filename):
-        with open(filename, "w") as f:
-            f.write("mlpicker.eventRootDir = %s\n" % self.eventRootDir)
-            f.write("mlpicker.spoolDir = %s\n" % self.spoolDir)
 
 
     def createCommandLineDescription(self):
@@ -417,7 +409,7 @@ class OriginStreamApp(seiscomp.client.Application):
             n, s, l, c = scdlpicker.util.nslc(pick)
             net_sta_blacklist.append((n, s))
 
-        additionalPicks = {}
+        predictedPicks = {}
 
         now = seiscomp.core.Time.GMT()
         inv = seiscomp.client.Inventory.Instance().inventory()
@@ -445,23 +437,23 @@ class OriginStreamApp(seiscomp.client.Application):
                 seiscomp.core.TimeSpan(firstArrival.time)
             timestamp = time.toString("%Y%m%d.%H%M%S.%f000000")[:18]
             pickID = timestamp + "-PRE-%s.%s.%s.%s" % (n, s, l, c)
-            predicted_pick = seiscomp.datamodel.Pick(pickID)
+            predictedPick = seiscomp.datamodel.Pick(pickID)
             phase = seiscomp.datamodel.Phase()
             phase.setCode("P")
-            predicted_pick.setPhaseHint(phase)
+            predictedPick.setPhaseHint(phase)
             q = seiscomp.datamodel.TimeQuantity(time)
-            predicted_pick.setTime(q)
+            predictedPick.setTime(q)
             wfid = seiscomp.datamodel.WaveformStreamID()
             wfid.setNetworkCode(n)
             wfid.setStationCode(s)
             wfid.setLocationCode(l)
             wfid.setChannelCode(c+"Z")
-            predicted_pick.setWaveformID(wfid)
+            predictedPick.setWaveformID(wfid)
             # We do not set the creation info here.
-            if pickID not in additionalPicks:
-                logging.debug("additional pick %s" % pickID)
-                additionalPicks[pickID] = predicted_pick
-        return additionalPicks
+            if pickID not in predictedPicks:
+                logging.debug("predicted pick %s" % pickID)
+                predictedPicks[pickID] = predictedPick
+        return predictedPicks
 
 
     def setupFolders(self):
@@ -656,7 +648,7 @@ class OriginStreamApp(seiscomp.client.Application):
         # Now all picks for which we don't have a DL pick are
         # considered new. Therefore also picks that were
         # received previously but failed to process due to
-        # missing data are now re-processed from scratch.
+        # missing data are now re-processed.
         workspace.new_picks.clear()
 
         associated_picks = []
@@ -732,15 +724,8 @@ class OriginStreamApp(seiscomp.client.Application):
                 delta.append(arr.distance())
             delta.sort()
 
-#           # If the 75% percentile of used picks is from farther
-#           # away than 50 degrees, we accept all stations up to 100
-#           # degrees. Work in progress.
-#           limit = int(3*len(delta)/4)
-#           maxDelta = delta[limit]
-#           maxDelta = min(maxDelta, 100.)
-
-            # A better criterion is to simply use the average
-            # distance of the five farthest used arrivals.
+            # As maximum distance use the average distance
+            # of the five farthest used arrivals.
             maxDelta = numpy.average(delta[-5:])
 
             # If the distance exceeds 50 degrees, it is promising
@@ -749,10 +734,10 @@ class OriginStreamApp(seiscomp.client.Application):
                 maxDelta = 100
 
         if tryUpickedStations:
-            predicted_picks = self.findUnpickedStations(
+            predictedPicks = self.findUnpickedStations(
                 workspace.origin, maxDelta, workspace.all_picks)
-            for pickID in predicted_picks:
-                pick = predicted_picks[pickID]
+            for pickID in predictedPicks:
+                pick = predictedPicks[pickID]
                 if pickID not in workspace.all_picks:
                     workspace.all_picks[pickID] = pick
                     workspace.new_picks[pickID] = pick
@@ -923,14 +908,71 @@ class OriginStreamApp(seiscomp.client.Application):
         self.pollResults()
 
 
+    def readResults(self, path):
+        """
+        Read repicking results from the specified YAML file.
+        """
+
+        picks = {}
+        confs = {}
+        with open(path) as yf:
+            ci = self._creationInfo()
+
+            # Note that the repicker module may have produced more
+            # than one repick per original pick. We pick the one
+            # with the larger confidence value. Later on we may also
+            # use the other picks e.g. as depth phases. Currently we
+            # don't do that but it's a TODO item.
+
+            for p in yaml.safe_load(yf):
+                pickID = p["publicID"]
+                pick = Pick(pickID)
+                time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
+                tq = seiscomp.datamodel.TimeQuantity()
+                tq.setValue(time)
+                pick.setTime(tq)
+                n = p["networkCode"]
+                s = p["stationCode"]
+                l = p["locationCode"]
+                c = p["channelCode"]
+                if len(c) == 2:
+                    c += "Z"
+                wfid = seiscomp.datamodel.WaveformStreamID()
+                wfid.setNetworkCode(n)
+                wfid.setStationCode(s)
+                wfid.setLocationCode("" if l == "--" else l)
+                wfid.setChannelCode(c)
+                pick.setWaveformID(wfid)
+
+                conf = float(p["confidence"])
+                
+                if pickID in picks:
+                    # only override existing pick with higher
+                    # confidence pick
+                    if conf <= confs[pickID]:
+                        continue
+                picks[pickID] = pick
+                confs[pickID] = conf
+                
+
+            for pickID in picks:
+                pick = picks[pickID]
+                pick.setCreationInfo(ci)
+                pick.setMethodID("DL")
+                phase = seiscomp.datamodel.Phase()
+                phase.setCode("P")
+                pick.setPhaseHint(phase)
+                pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
+
+        return picks
+
+
     def pollResults(self):
         """
         Check if the repicker module has produced new results.
 
-        In case there are new results available, we read them
-        and send them via the messaging.
+        If so, we read them and send them via the messaging.
         """
-        ci = self._creationInfo()
 
         todolist = list()
 
@@ -942,48 +984,21 @@ class OriginStreamApp(seiscomp.client.Application):
 
         for path in sorted(todolist):
             logging.info("pollResults: working on "+path)
-            with open(path) as yf:
-                picks = []
-                for p in yaml.safe_load(yf):
-                    pick = Pick(p["publicID"])
-                    time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
-                    tq = seiscomp.datamodel.TimeQuantity()
-                    tq.setValue(time)
-                    pick.setTime(tq)
-                    n = p["networkCode"]
-                    s = p["stationCode"]
-                    l = p["locationCode"]
-                    c = p["channelCode"]
-                    if len(c) == 2:
-                        c += "Z"
-                    wfid = seiscomp.datamodel.WaveformStreamID()
-                    wfid.setNetworkCode(n)
-                    wfid.setStationCode(s)
-                    wfid.setLocationCode("" if l == "--" else l)
-                    wfid.setChannelCode(c)
-                    pick.setWaveformID(wfid)
-                    picks.append(pick)
-
-                for pick in picks:
-                    pick.setCreationInfo(ci)
-                    pick.setMethodID("DL")
-                    phase = seiscomp.datamodel.Phase()
-                    phase.setCode("P")
-                    pick.setPhaseHint(phase)
-                    pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
+            picks = self.readResults(path)
 
             ep = EventParameters()
             Notifier.Enable()
-            for pick in picks:
+            for pickID in picks:
+                pick = picks[pickID]
                 ep.add(pick)
             msg = Notifier.GetMessage()
             Notifier.Disable()
             if self.connection().send(msg):
-                for pick in picks:
-                    logging.info("sent "+pick.publicID())
+                for pickID in picks:
+                    logging.info("sent "+pickID)
             else:
-                for pick in picks:
-                    logging.info("failed to send "+pick.publicID())
+                for pickID in picks:
+                    logging.info("failed to send "+pickID)
             d, f = os.path.split(path)
             sent = os.path.join(self.sentDir, f)
             os.rename(path, sent)
@@ -995,8 +1010,7 @@ class OriginStreamApp(seiscomp.client.Application):
         try:
             eventID = self.commandline().optionString("event")
         except RuntimeError as e:
-            # FIXME: This exception is a bit strange
-            #        but we cannot fix that here.
+            # A bit strange exception, but we can't change it.
             assert str(e) == "Invalid type for cast"
             eventID = None
 

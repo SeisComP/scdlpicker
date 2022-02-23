@@ -25,6 +25,7 @@ from .util import isotimestamp, nslc
 
 
 class EventWorkspace:
+
     def __init__(self):
         self.ep = None
         self.event = None
@@ -77,27 +78,24 @@ class EventWorkspace:
 
         eventID = self.event.publicID()
         eventDir = os.path.join(eventRootDir, eventID)
-        try:
-            os.makedirs(eventDir)
-        except FileExistsError:
-            pass
+        yamlInputDir = os.path.join(eventDir, "in")
+
+        os.makedirs(yamlInputDir, exist_ok=True)
+        os.makedirs(eventDir, exist_ok=True)
 
         # first dump waveforms
         self.dump_waveforms(eventRootDir=eventRootDir)
 
         # then dump yaml
         timestamp = isotimestamp(self.origin.creationInfo().creationTime())
-        yamlFileName = os.path.join(
-            eventRootDir, eventID, "%s.yaml" % timestamp)
+        yamlFileName = os.path.join(yamlInputDir, "%s.yaml" % timestamp)
         self.writePicksToYAML(yamlFileName)
 
         # finally create spool symlink
-        try:
-            os.makedirs(spoolDir)
-        except FileExistsError:
-            pass
+        os.makedirs(spoolDir, exist_ok=True)
         dst = os.path.join(spoolDir, "%s.yaml" % timestamp)
-        src = os.path.join("..", eventRootDir, eventID, "%s.yaml" % timestamp)
+        # TODO: clean up!
+        src = os.path.join("..", eventRootDir, eventID, "in", "%s.yaml" % timestamp)
 
         try:
             seiscomp.logging.debug("creating symlink %s -> %s" % (dst, src))

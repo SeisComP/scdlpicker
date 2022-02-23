@@ -26,6 +26,7 @@ A simple relocator for SeisComP, to be used on the command line. For a given eve
 
 
 ## Requirements
+
 - [Python 3](http://python.org)
 - [SeisComP](http://seiscomp.de) incl. Python wrappers
 - [SeisBench](https://github.com/seisbench)
@@ -33,14 +34,23 @@ A simple relocator for SeisComP, to be used on the command line. For a given eve
 
 
 ## Build requirements
+
 - python3-setuptools
 - python3-distutils-extra
 
 
 ## Installation
+
 To install, you simply run `python setup.py install`. Note: there is no uninstall script.
 
 You need to have installed SeisBench previously.
+
+
+## Disclaimer
+
+This package is work in progress and provided "as is" in the hope that some users will find it useful for their work. No guarantee can be given that it will work in all circumstances or produce improved results. Interfaces may change without notice. Especially the YAML interface between the two main modules is rather ad hoc and will likely be modified, which is will be no problem as long as no other modules depend on the details.
+
+The package is not intended to be a turn-key solution and no support can be provided. Feedback in the form of bug reports or enhancement is of course greatly appreciated.
 
 
 ## Authors & Acknowlegements
