@@ -72,3 +72,14 @@ def InventoryIterator(inventory, time=None):
                         continue
 
                     yield network, station, location, stream
+
+
+def findStation(inventory, nslc, time):
+    net, sta, loc, cha = nslc
+
+    for item in scdlpicker.inventory.InventoryIterator(inventory, time=time):
+        network, station, location, stream = item
+
+        # return first-matching station object
+        if network.code() == net and station.code() == sta:
+            return station

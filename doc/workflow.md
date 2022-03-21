@@ -76,3 +76,56 @@ primitive yet robust way.
   `outgoing`. The working directory therefore will accumulate data
   files and old, unneeded files should be removed from time to time.
   It is the responsibility of the user to handle this.
+
+
+## Example
+
+If `scdlpicker.client.py` is invoked with command-line arguments
+`--working-dir $HOME/scdlpicker` then all data will be written to
+and read from that directory. An example of how the contents of that
+directory are structured is given below.
+
+```
+$ ls scdlpicker       
+events	outgoing  sent	spool
+$ ls scdlpicker/events
+gfz2022dxfc gfz2022dxfg
+$ ls scdlpicker/events/gfz2022dxfc
+annot  in  out	waveforms
+$ ls scdlpicker/events/gfz2022dxfc/in 
+2022-02-25T09:22:45.698Z.yaml  2022-02-25T09:26:40.897Z.yaml  2022-02-25T09:31:59.159Z.yaml
+2022-02-25T09:24:22.454Z.yaml  2022-02-25T09:26:52.454Z.yaml  2022-02-25T09:39:11.641Z.yaml
+2022-02-25T09:25:22.454Z.yaml  2022-02-25T09:29:11.873Z.yaml
+$ ls scdlpicker/events/gfz2022dxfc/out
+2022-02-25T09:22:45.698Z.yaml  2022-02-25T09:26:40.897Z.yaml  2022-02-25T09:31:59.159Z.yaml
+2022-02-25T09:24:22.454Z.yaml  2022-02-25T09:26:52.454Z.yaml
+2022-02-25T09:25:22.454Z.yaml  2022-02-25T09:29:11.873Z.yaml
+$ ls scdlpicker/sent
+2022-02-25T09:22:45.698Z.yaml 2022-02-25T09:24:22.454Z.yaml 2022-02-25T09:25:22.454Z.yaml
+2022-02-25T09:26:40.897Z.yaml 2022-02-25T09:26:52.454Z.yaml 2022-02-25T09:29:11.873Z.yaml
+2022-02-25T09:31:59.159Z.yaml 2022-02-25T09:28:32.454Z.yaml 2022-02-25T09:29:32.454Z.yaml
+2022-02-25T09:30:36.688Z.yaml 2022-02-25T09:31:28.074Z.yaml 2022-02-25T09:42:54.251Z.yaml
+2022-02-25T09:46:00.179Z.yaml
+$ ls scdlpicker/events/gfz2022dxfc/waveforms | grep '^I' | head
+II.BORG.00.BH1.mseed
+II.BORG.00.BH2.mseed
+II.BORG.00.BHZ.mseed
+II.CMLA.00.BH1.mseed
+II.CMLA.00.BH2.mseed
+II.CMLA.00.BHZ.mseed
+II.EFI.00.BH1.mseed
+II.EFI.00.BH2.mseed
+II.EFI.00.BHZ.mseed
+II.ERM.00.BH1.mseed
+$ ls scdlpicker/events/gfz2022dxfc/annot | grep '^I' | head
+II.BORG.00.BH.sac
+II.CMLA.00.BH.sac
+II.EFI.00.BH.sac
+II.ERM.00.BH.sac
+II.ESK.00.BH.sac
+II.FFC.00.BH.sac
+II.JTS.00.BH.sac
+II.KDAK.00.BH.sac
+II.KURK.00.BH.sac
+II.LVZ.00.BH.sac
+```

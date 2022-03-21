@@ -36,6 +36,7 @@ setup(
         "bin/scdlpicker.client.py",
         "bin/scdlpicker.repicker.py",
         "bin/scdlpicker.relocate-event.py",
+        "bin/scdlpicker.online-relocator.py",
         "bin/scexec"
     ]
 )

@@ -48,7 +48,7 @@ agency = "GFZ"
 # The acquisition will wait that long to finalize the acquisition
 # of waveform time windows. The processing may be interrupted that
 # long!
-streamTimeout = 30
+streamTimeout = 5
 
 # This is the directory where all the event data are written to.
 workingDir = "."
@@ -134,7 +134,8 @@ def alreadyRepicked(pick):
 def gappy(waveforms, tolerance=0.5):
     """
     Check if there are any gaps in the waveforms. The waveforms
-    argument is a sequence of Record objects.
+    argument is an ordered sequence of Record objects from the same
+    stream, i.e. all with same NSLC.
 
     The tolerance is specified in multiples of the sampling interval.
     The default is half of a sampling interval.
@@ -162,15 +163,12 @@ class OriginStreamApp(seiscomp.client.Application):
         self.outgoingDir = None
         self.sentDir = None
 
-        self.streamTimeout = streamTimeout
-
         self.ignoredAuthors = ignoredAuthors
         self.ignoredAgencyIDs = ignoredAgencyIDs
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
         self.tryUpickedStations = tryUpickedStations
 
         super(OriginStreamApp, self).__init__(argc, argv)
-        seiscomp.client.StreamApplication.__init__(self, argc, argv)
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
 
@@ -184,6 +182,13 @@ class OriginStreamApp(seiscomp.client.Application):
         self.workspaces = dict()
         self.acquisitionInProgress = False
 
+        # Keep track of events that need to be processed. We process
+        # one event at a time. In this dict we register the events
+        # that require processing but we delay processing until
+        # previous events are finished.
+        self.pendingEvents = dict()
+
+
 
     def initConfiguration(self):
         # Called BEFORE validateParameters()
@@ -191,8 +196,6 @@ class OriginStreamApp(seiscomp.client.Application):
         seiscomp.logging.error("initConfigurarion(self)")
         if not super(OriginStreamApp, self).initConfiguration():
             return False
-
-        self.streamTimeout = streamTimeout
 
         try:
             self.workingDir = self.configGetString("mlpicker.workingDir")
@@ -335,6 +338,15 @@ class OriginStreamApp(seiscomp.client.Application):
         self.configuredStreams = self._getConfiguredStreams()
 
         return True
+
+
+    def handleTimeout(self):
+
+        self.pollResults()
+
+        for eventID in sorted(self.pendingEvents.keys()):
+            event = self.pendingEvents.pop(eventID)
+            self.processEvent(event)
 
 
     def _getConfiguredStreams(self):
@@ -510,7 +522,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
         self.acquisitionInProgress = True
 
-        waveform_windows = []
+        datarequest = list()
         for pickID in picks:
             pick = picks[pickID]
             wfid = pick.waveformID()
@@ -533,13 +545,14 @@ class OriginStreamApp(seiscomp.client.Application):
             key = "%s.%s.%s.%s" % (net, sta, loc, cha)
             mseedFileName = os.path.join(self.eventRootDir, eventID, key+".mseed")
             if os.path.exists(mseedFileName):
+                # TODO: Check data completeness, otherwise do request
                 continue
 
             t0 = pick.time().value()
             beforeP = afterP = 60.  # temporarily
             t1 = t0 + seiscomp.core.TimeSpan(-beforeP)
             t2 = t0 + seiscomp.core.TimeSpan(afterP)
-            waveform_windows.append((t1, t2, net, sta, loc, cha))
+            datarequest.append((t1, t2, net, sta, loc, cha))
             t1 = scdlpicker.util.isotimestamp(t1)
             t2 = scdlpicker.util.isotimestamp(t2)
             logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
@@ -547,7 +560,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
         waveforms = dict()
 
-        if not waveform_windows:
+        if not datarequest:
             self.acquisitionInProgress = False
             return waveforms  # empty
 
@@ -556,14 +569,13 @@ class OriginStreamApp(seiscomp.client.Application):
         stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
         stream.setTimeout(streamTimeout)
         streamCount = 0
-        for t1, t2, net, sta, loc, cha in waveform_windows:
+        for t1, t2, net, sta, loc, cha in datarequest:
             try:
                 components = self.components[(net, sta, loc, cha[:2])]
             except KeyError as e:
-                # This may occur if a station was added to the
-                # processing. But we load the config only once at
-                # start. Make sure it doesn't crash.
-                logging.warning("Caught " + repr(e))
+                # This may occur if a station was (1) blacklisted or
+                # (2) added to the processing later on.
+                # Either way we skip this pick.
                 continue
             for c in components:
                 _loc = "" if loc == "--" else loc
@@ -607,17 +619,124 @@ class OriginStreamApp(seiscomp.client.Application):
                     del waveforms[streamID]
                     logging.warning("Incomplete stream "+streamID+" ignored")
 
-#       incompleteStreams = []
-#       for streamID in waveforms:
-#           firstRecord = waveforms[streamID][0]
-#           n,s,l,c = scdlpicker.util.nslc(firstRecord)
-#           if (n,s,l) in incompleteNSL:
-#               incompleteStreams.append(streamID)
-#       for streamID in incompleteStreams:
-#           logging.warning("Incomplete stream "+streamID+" ignored")
-
         self.acquisitionInProgress = False
         return waveforms
+
+
+
+    def testEvent(self, eventID,
+            skipManualOrigins=True,
+            preferredOriginOnly=False):
+        """
+        Test the module for the event with the specified ID.
+
+        Real-time is simulated by loading all origins and then
+        iterate over these origins in the order of their creation.
+        Then for each origin we load the data from the waveform
+        server but only for the picks not yet loaded.
+        """
+        # load event and preferred origin
+        event = self._loadEvent(eventID)
+        if not event:
+            logging.error("Failed to load event "+eventID)
+            return False
+
+        logging.debug("Loaded event "+eventID)
+
+        workspace = self.workspaces[eventID] = scdlpicker.eventworkspace.EventWorkspace()
+        workspace.event = event
+        workspace.origin = None
+        workspace.all_picks = dict()
+
+        origins = list()
+
+        if preferredOriginOnly is True:
+            origin = self.query().loadObject(
+                Origin.TypeInfo(), event.preferredOriginID())
+            origin = Origin.Cast(origin)
+            origins.append(origin)
+        else:
+            tmp_origins = list()
+            for origin in self.query().getOrigins(eventID):
+                try:
+                    # hack to acquire ownership
+                    origin = Origin.Cast(origin)
+                    assert origin is not None
+                    origin.creationInfo().creationTime()
+                except ValueError:
+                    continue
+                except AssertionError:
+                    continue
+
+                if manual(origin) and skipManualOrigins is True:
+                    logging.debug("Skipping manual origin " + origin.publicID())
+                    continue
+
+                tmp_origins.append(origin)
+
+            # two origin loops to prevent nested DB calls
+            for origin in tmp_origins:
+
+                # This loads everything including the arrivals
+                # but is very slow
+                # origin = self.query().loadObject(
+                #     Origin.TypeInfo(), origin.publicID())
+                # origin = Origin.Cast(origin)
+                # if not origin: continue
+
+                # See if the origin has arrivals. Of not, try to load
+                # arrivals from database. If still no arrivals, give up.
+                # loadArrivals() is much faster than the more
+                # comprehensive loadObject()
+                if origin.arrivalCount() == 0:
+                    self.query().loadArrivals(origin)
+                if origin.arrivalCount() == 0:
+                    continue
+
+                origins.append(origin)
+
+        logging.debug("Loaded %d origin(s)" % len(origins))
+
+        sorted_origins = sorted(
+            origins, key=lambda origin: origin.creationInfo().creationTime())
+
+        for origin in sorted_origins:
+            if self.isExitRequested():
+                # e.g. Ctrl-C
+                return True
+
+            workspace.origin = origin
+            self.processOrigin(origin, event)
+            workspace.dump()
+
+        return True
+
+
+    def addObject(self, parentID, obj):
+        # called by the Application class if a new object is received
+        event = Event.Cast(obj)
+        if scdlpicker.util.valid(event):
+            self.pendingEvents[event.publicID()] = event
+
+
+    def updateObject(self, parentID, obj):
+        # called by the Application class if an updated object is received
+        event = Event.Cast(obj)
+        if scdlpicker.util.valid(event):
+            self.pendingEvents[event.publicID()] = event
+
+
+    def cleanup(self, timeout=30*3600):
+        # timeout = 86400 # one day
+        now = seiscomp.core.Time.GMT()
+        tmin = now-seiscomp.core.TimeSpan(timeout)
+        blacklist = []
+        for eventID in self.workspaces:
+            workspace = self.workspaces[eventID]
+            if workspace.origin.time().value() < tmin:
+                blacklist.append(eventID)
+        for eventID in blacklist:
+            del self.workspaces[eventID]
 
 
     def processOrigin(self, origin, event):
@@ -726,145 +845,39 @@ class OriginStreamApp(seiscomp.client.Application):
 
             # As maximum distance use the average distance
             # of the five farthest used arrivals.
-            maxDelta = numpy.average(delta[-5:])
+            maxDelta = numpy.average(delta[-3:])
 
             # If the distance exceeds 50 degrees, it is promising
             # to look at the entire P distance range.
-            if maxDelta > 50:
+            if maxDelta > 40:
                 maxDelta = 100
 
         if tryUpickedStations:
+            # TODO: delay
+            seiscomp.logging.debug("tryUpickedStations A XXX")
             predictedPicks = self.findUnpickedStations(
                 workspace.origin, maxDelta, workspace.all_picks)
-            for pickID in predictedPicks:
-                pick = predictedPicks[pickID]
-                if pickID not in workspace.all_picks:
-                    workspace.all_picks[pickID] = pick
-                    workspace.new_picks[pickID] = pick
+            seiscomp.logging.debug("%d predicted picks" % len(predictedPicks))
+            if len(predictedPicks) > 0:
+                for pickID in predictedPicks:
+                    pick = predictedPicks[pickID]
+                    if pickID not in workspace.all_picks:
+                        workspace.all_picks[pickID] = pick
+                        workspace.new_picks[pickID] = pick
+                seiscomp.logging.debug("tryUpickedStations B XXX")
 
-            waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
-            for streamID in waveforms:
-                workspace.waveforms[streamID] = waveforms[streamID]
+                seiscomp.logging.debug("tryUpickedStations B XXX2")
+                waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
+                seiscomp.logging.debug("tryUpickedStations B XXX3")
+                for streamID in waveforms:
+                    workspace.waveforms[streamID] = waveforms[streamID]
+                seiscomp.logging.debug("tryUpickedStations B XXX4")
+                seiscomp.logging.debug("tryUpickedStations C XXX")
 
         # We dump the waveforms to files in order to
         # read them as miniSEED files into ObsPy. This
         # is the SeisComP-to-ObsPy iterface so to say.
         workspace.dump(eventRootDir=self.eventRootDir, spoolDir=self.spoolDir)
-
-
-    def testEvent(self, eventID,
-            skipManualOrigins=True,
-            preferredOriginOnly=False):
-        """
-        Test the module for the event with the specified ID.
-
-        Real-time is simulated by loading all origins and then
-        iterate over these origins in the order of their creation.
-        Then for each origin we load the data from the waveform
-        server but only for the picks not yet loaded.
-        """
-        # load event and preferred origin
-        event = self._loadEvent(eventID)
-        if not event:
-            logging.error("Failed to load event "+eventID)
-            return False
-
-        logging.debug("Loaded event "+eventID)
-
-        workspace = self.workspaces[eventID] = scdlpicker.eventworkspace.EventWorkspace()
-        workspace.event = event
-        workspace.origin = None
-        workspace.all_picks = dict()
-
-        origins = list()
-
-        if preferredOriginOnly is True:
-            origin = self.query().loadObject(
-                Origin.TypeInfo(), event.preferredOriginID())
-            origin = Origin.Cast(origin)
-            origins.append(origin)
-        else:
-            tmp_origins = list()
-            for origin in self.query().getOrigins(eventID):
-                try:
-                    # hack to acquire ownership
-                    origin = Origin.Cast(origin)
-                    assert origin is not None
-                    origin.creationInfo().creationTime()    
-                except ValueError:
-                    continue
-                except AssertionError:
-                    continue
-
-                if manual(origin) and skipManualOrigins is True:
-                    logging.debug("Skipping manual origin " + origin.publicID())
-                    continue
-
-                tmp_origins.append(origin)
-
-            # two origin loops to prevent nested DB calls
-            for origin in tmp_origins:
-
-                # This loads everything including the arrivals
-                # but is very slow
-                # origin = self.query().loadObject(
-                #     Origin.TypeInfo(), origin.publicID())
-                # origin = Origin.Cast(origin)
-                # if not origin: continue
-
-                # See if the origin has arrivals. Of not, try to load
-                # arrivals from database. If still no arrivals, give up.
-                # loadArrivals() is much faster than the more
-                # comprehensive loadObject()
-                if origin.arrivalCount() == 0:
-                    self.query().loadArrivals(origin)
-                if origin.arrivalCount() == 0:
-                    continue
-
-                origins.append(origin)
-
-        logging.debug("Loaded %d origin(s)" % len(origins))
-
-        sorted_origins = sorted(
-            origins, key=lambda origin: origin.creationInfo().creationTime())
-
-        for origin in sorted_origins:
-            if self.isExitRequested():
-                # e.g. Ctrl-C
-                return True
-
-            workspace.origin = origin
-            self.processOrigin(origin, event)
-            workspace.dump()
-
-        return True
-
-
-    def addObject(self, parentID, obj):
-        # called by the allpication class if a new object is received
-        event = Event.Cast(obj)
-        if event:
-            self.processEvent(event)
-
-
-    def updateObject(self, parentID, obj):
-        # called by the allpication class if an updated object is received
-        event = Event.Cast(obj)
-        if event:
-            self.processEvent(event)
-
-
-    def cleanup(self, timeout=30*3600):
-        # timeout = 86400 # one day
-        now = seiscomp.core.Time.GMT()
-        tmin = now-seiscomp.core.TimeSpan(timeout)
-        blacklist = []
-        for eventID in self.workspaces:
-            workspace = self.workspaces[eventID]
-            if workspace.origin.time().value() < tmin:
-                blacklist.append(eventID)
-        for eventID in blacklist:
-            del self.workspaces[eventID]
 
 
     def processEvent(self, event):
@@ -900,12 +913,6 @@ class OriginStreamApp(seiscomp.client.Application):
         ci.setAgencyID(agency)
         ci.setCreationTime(seiscomp.core.Time.GMT())
         return ci
-
-
-    def handleTimeout(self):
-        if self.acquisitionInProgress:
-            return
-        self.pollResults()
 
 
     def readResults(self, path):
@@ -1018,6 +1025,7 @@ class OriginStreamApp(seiscomp.client.Application):
             logging.info("In single-event mode. Event is "+eventID)
             return self.testEvent(eventID)
 
+        # enter real-time mode
         self.enableTimer(1)
         PublicObject.SetRegistrationEnabled(False)
 

@@ -23,196 +23,28 @@ This is a very simple relocator that
   travel times
 - relocates based on *only* the DL-picks
 - sends the results
-
-Missing
-
-- amplitudes
-- and therefore also magnitudes
-- and therefore origin will not become preferred
 """
-
 
 
 import sys, time
 import seiscomp.core
 import seiscomp.client
 import seiscomp.datamodel
-import seiscomp.io
 import seiscomp.logging
 import seiscomp.math
 import seiscomp.seismology
 import scdlpicker.dbutil
 import scdlpicker.util
 import scdlpicker.inventory
+import scdlpicker.relocation
 
 
 maxResidual = 2.5
 maxRMS = 1.7
 
 
-def findStation(inventory, nslc, time):
-    net, sta, loc, cha = nslc
-
-    for item in scdlpicker.inventory.InventoryIterator(inventory, time=time):
-        network, station, location, stream = item
-
-        # return first-matching station object
-        if network.code() == net and station.code() == sta:
-            return station
-
-
-def uncertainty(quantity):
-    try:
-        err = 0.5*(quantity.lowerUncertainty()+quantity.upperUncertainty())
-    except:
-        try:
-            err = quantity.uncertainty()
-        except:
-            err = None
-    return err
-
-
-def time2str(time, decimals=1):
-    """
-    Convert a seiscomp.core.Time to a string
-    """
-    return time.toString("%Y-%m-%d %H:%M:%S.%f000000")[:20+decimals]
-
-
 def author(obj):
     return obj.creationInfo().author()
-
-
-def status(obj):
-    try:
-        stat = seiscomp.datamodel.EEvaluationStatusNames.name(obj.evaluationStatus())
-    except:
-        stat = "NULL"
-    try:
-        mode = seiscomp.datamodel.EEvaluationModeNames.name(obj.evaluationMode())
-    except:
-        mode = "NULL"
-    return "%s / %s" % (mode, stat)
-
-
-def ArrivalIterator(origin):
-    for i in range(origin.arrivalCount()):
-        yield origin.arrival(i)
-
-
-def summary(obj, withPicks=False):
-    print("Origin %s" % obj.publicID())
-    print("  Status      %s" % status(obj))
-
-    tstr = time2str(obj.time().value())
-    print("  Time       %s" % tstr)
-    lat = obj.latitude().value()
-    lon = obj.longitude().value()
-    print("  Latitude   %+8.3f" % lat)
-    print("  Longitude  %+8.3f" % lon)
-    dep = obj.depth()
-    val = dep.value()
-    if uncertainty(dep):
-        print("  Depth      %4.4g km" % val)
-    else:
-        print("  Depth      %4.4g km fixed" % val)
-
-    countAll = 0
-    countUsed = 0
-    for arr in ArrivalIterator(obj):
-        if arr.weight() > 0.5:
-            countUsed += 1
-        countAll += 1
-
-    print("  Arr used  %d" % countUsed)
-    print("  Arr all   %d" % countAll)
-    print("  Pha count %d" % obj.quality().usedPhaseCount())
-
-    # FIXME: usedStationCount and standardError are currently sometimes
-    #        adopted from the seeding origin
-    # TODO:  ensure usedStationCount and standardError are always computed
-    try:
-        print("  Sta count %d" % obj.quality().usedStationCount())
-    except ValueError:
-        pass
-    try:
-        print("  RMS        %.2f" % obj.quality().standardError())
-    except ValueError:
-        pass
-
-    if withPicks:
-        time_picks = []
-        for arr in ArrivalIterator(obj):
-            pickID = arr.pickID()
-            pick = seiscomp.datamodel.Pick.Find(pickID)
-            if not pick:
-                seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
-                continue
-            time_picks.append((pick.time().value(), pick))
-        for t,pick in sorted(time_picks):
-            print("  %s" % pick.publicID())
-            
-                
-
-def dumpOriginXML(origin, xmlFileName):
-    seiscomp.logging.debug("dumping origin '%s' to XML file '%s'"
-        % (origin.publicID(), xmlFileName))
-    ep = seiscomp.datamodel.EventParameters()
-    ep.add(origin)
-    for arr in ArrivalIterator(origin):
-        pickID = arr.pickID()
-        pick = seiscomp.datamodel.Pick.Find(pickID)
-        if not pick:
-            seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
-        ep.add(pick)
-    ar = seiscomp.io.XMLArchive()
-    ar.setFormattedOutput(True)
-    ar.create(xmlFileName)
-    ar.writeObject(ep)
-    ar.close()
-    return True
-
-
-def trimLargestResidual(origin, maxResidual):
-    """
-    Identify the arrival with the largest residual and disable
-    it in case the residual exceeds maxResidual.
-
-    Returns True if such an arrival was found and disables,
-    otherwise False.
-    """
-
-    largest = None
-    for arr in ArrivalIterator(origin):
-
-        if not arr.timeUsed():
-            continue
-
-        try:
-            if arr.distance() > 105:
-                arr.setTimeUsed(False)
-                arr.setWeight(0.)
-                continue
-        except ValueError as e:
-            seiscomp.logging.error(arr.pickID())
-            raise
-
-        if largest is None:
-            largest = arr
-            continue
-
-        if abs(arr.timeResidual()) > abs(largest.timeResidual()):
-            largest = arr
-
-    largestResidual = abs(largest.timeResidual())
-    seiscomp.logging.debug("largest residual %5.2f s" % largestResidual)
-    if largestResidual > maxResidual:
-        largest.setTimeUsed(False)
-        largest.setWeight(0.)
-        return True
-    else:
-        False
-
 
 
 class RelocatorApp(seiscomp.client.Application):
@@ -230,14 +62,16 @@ class RelocatorApp(seiscomp.client.Application):
 
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
+        self.commandline().addGroup("Config");
+        self.commandline().addStringOption("Config", "author", "Author of created objects");
+        self.commandline().addStringOption("Config", "agency", "Agency of created objects");
         self.commandline().addGroup("Target");
         self.commandline().addStringOption("Target", "event,E",  "load the specified event");
         self.commandline().addStringOption("Target", "pick-authors", "space-separated whitelist of pick authors");
-        self.commandline().addDoubleOption("Target", "fixed-depth",
-"fix the depth at the specified value (in kilometers)");
+        self.commandline().addDoubleOption("Target", "fixed-depth", "fix the depth at the specified value (in kilometers)");
         self.commandline().addDoubleOption("Target", "max-residual", "limit the individual pick residual to the specified value (in seconds)");
         self.commandline().addDoubleOption("Target", "max-rms", "limit the pick residual RMS to the specified value (in seconds)");
-
+        self.commandline().addOption("Target", "test", "test mode - don't send the result");
 
 
     def _load(self, oid, tp):
@@ -246,34 +80,35 @@ class RelocatorApp(seiscomp.client.Application):
         tmp = tp.Cast(obj)
         return tmp
 
-    def _load_event(self, eventID, originIDs=[]):
-        seiscomp.logging.info("Loading event %s from database" % eventID)
-        event = self._load(eventID, seiscomp.datamodel.Event)
 
-        if not originIDs:
-            originIDs = [ event.preferredOriginID() ]
+#   def _loadEvent(self, eventID, originIDs=[]):
+#       seiscomp.logging.info("Loading event %s from database" % eventID)
+#       event = self._load(eventID, seiscomp.datamodel.Event)
 
-        origins = []
-        picks = {}
-        for originID in originIDs:
+#       if not originIDs:
+#           originIDs = [ event.preferredOriginID() ]
 
-            origin = self._load(originID, seiscomp.datamodel.Origin)
-            origins.append(origin)
+#       origins = []
+#       picks = {}
+#       for originID in originIDs:
 
-            #### Not needed:
-            # self.query().loadArrivals(origin)
+#           origin = self._load(originID, seiscomp.datamodel.Origin)
+#           origins.append(origin)
 
-            seiscomp.logging.info("Loading corresponding picks")
-            for arr in ArrivalIterator(origin):
-                pid = arr.pickID()
-                if pid in picks:
-                    continue
-                obj = self._load(pid, seiscomp.datamodel.Pick)
-                picks[pid] = obj
-            seiscomp.logging.info("Loaded %d picks" % len(picks))
+#           #### Not needed:
+#           # self.query().loadArrivals(origin)
 
-            seiscomp.logging.info("Loading completed")
-        return event, origins, picks
+#           seiscomp.logging.info("Loading corresponding picks")
+#           for arr in scdlpicker.util.ArrivalIterator(origin):
+#               pid = arr.pickID()
+#               if pid in picks:
+#                   continue
+#               obj = self._load(pid, seiscomp.datamodel.Pick)
+#               picks[pid] = obj
+#           seiscomp.logging.info("Loaded %d picks" % len(picks))
+
+#           seiscomp.logging.info("Loading completed")
+#       return event, origins, picks
 
 
     def loadPicks(self, origin, authorIDs):
@@ -301,11 +136,10 @@ class RelocatorApp(seiscomp.client.Application):
         startTime = origin.time().value()
         endTime = startTime + seiscomp.core.TimeSpan(1200.)
         picks = scdlpicker.dbutil.loadPicksForTimespan(self.query(), startTime, endTime)	
-
         result = []
         for pickID in picks:
             pick = picks[pickID]
-            if pick.creationInfo().author() not in authorIDs:
+            if author(pick) not in authorIDs:
                 continue
             n,s,l,c = scdlpicker.util.nslc(pick)
             try:
@@ -341,28 +175,9 @@ class RelocatorApp(seiscomp.client.Application):
         return origin, result
 
 
-    def run(self):
+    def processEvent(self, eventID):
+        seiscomp.logging.info("Working on event "+eventID)
 
-        # seiscomp.seismology.LocatorInterface
-        # seiscomp.seismology.LocSAT
-
-        seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
-
-        pickAuthors = ["dlpicker"]
-#       pickAuthors = self.commandline().optionString("pick-authors")
-#       pickAuthors = pickAuthors.split()
-
-        try:
-            self.maxResidual = self.commandline().optionDouble("max-residual")
-        except RuntimeError:
-            self.maxResidual = maxResidual
-
-        try:
-            self.maxRMS = self.commandline().optionDouble("max-rms")
-        except RuntimeError:
-            self.maxRMS = maxRMS
-
-        eventID = self.commandline().optionString("event")
         event  = scdlpicker.dbutil.loadEvent(self.query(), eventID)
         origin = scdlpicker.dbutil.loadOrigin(self.query(), event.preferredOriginID())
 
@@ -370,57 +185,17 @@ class RelocatorApp(seiscomp.client.Application):
         # their association. 
         origin, picks = self.loadPicks(origin, authorIDs=["dlpicker"])
 
-        for arr in ArrivalIterator(origin):
+        for arr in scdlpicker.util.ArrivalIterator(origin):
             pickID = arr.pickID()
             if not seiscomp.datamodel.Pick.Find(pickID):
                 seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
 
+        relocated = scdlpicker.relocation.relocate(origin, eventID, self.fixedDepth, self.minimumDepth, self.maxResidual)
 
-        summary(origin)
-
-        loc = seiscomp.seismology.LocatorInterface.Create("LOCSAT")
-        fixed = not uncertainty(origin.depth())
-        fixed = self.commandline().hasOption("fixed-depth")
-        if fixed:
-            dep = self.commandline().optionDouble("fixed-depth")
-            loc.useFixedDepth(True)
-            loc.setFixedDepth(dep)
-            seiscomp.logging.info("Using fixed depth of %g km" % dep)
-        else:
-            loc.useFixedDepth(False)
-
-        now = seiscomp.core.Time.GMT();
-
-        while True:
-            try:
-                relocated = loc.relocate(origin)
-            except RuntimeError:
-                seiscomp.logging.error("Failed to relocate origin")
-                # We sometimes observe that a locator fails to
-                # relocate an origin. At the moment we cannot
-                # repair that and therefore have to give up. But
-                # before that we dump the origin and picks to XML.
-                summary(origin, withPicks=True)
-                timestamp = scdlpicker.util.isotimestamp(now)
-                dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
-                    % (eventID, timestamp))
-                raise
-
-            if not fixed and \
-               relocated.depth().value() < self.minimumDepth:
-                loc.useFixedDepth(True)
-                loc.setFixedDepth(self.minimumDepth)
-                relocated = loc.relocate(origin)
-                loc.useFixedDepth(False)
-
-            if not trimLargestResidual(relocated, maxResidual):
-                break
-
-            origin = relocated
-
+        now = seiscomp.core.Time.GMT()
         crea = seiscomp.datamodel.CreationInfo()
-        crea.setAuthor("dl-reloc")
-        crea.setAgencyID("GFZ")
+        crea.setAuthor(self.author)
+        crea.setAgencyID(self.agencyID)
         crea.setCreationTime(now)
         crea.setModificationTime(now)
         relocated.setCreationInfo(crea)
@@ -433,16 +208,54 @@ class RelocatorApp(seiscomp.client.Application):
         msg = seiscomp.datamodel.Notifier.GetMessage()
         seiscomp.datamodel.Notifier.Disable()
 
-        if self.connection().send(msg):
-            seiscomp.logging.info("sent "+relocated.publicID())
+        if self.commandline().hasOption("test"):
+            pass
+        else:
+            if self.connection().send(msg):
+                seiscomp.logging.info("sent "+relocated.publicID())
 
-        summary(relocated)
+        scdlpicker.util.summarize(relocated)
 
-#       ar = seiscomp.io.XMLArchive()
-#       ar.setFormattedOutput(True)
-#       ar.create("out.xml")
-#       ar.writeObject(ep)
-#       ar.close()
+
+    def run(self):
+
+        seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
+
+        try:
+            pickAuthors = self.commandline().optionString("pick-authors")
+            pickAuthors = pickAuthors.split()
+        except RuntimeError:
+            pickAuthors = ["dlpicker"]
+
+        try:
+            self.author = self.commandline().optionString("author")
+        except RuntimeError:
+            self.author = "dl-reloc"
+
+        try:
+            self.agencyID = self.commandline().optionString("agency")
+        except RuntimeError:
+            self.agencyID = "GFZ"
+
+        try:
+            self.fixedDepth = self.commandline().optionDouble("fixed-depth")
+        except RuntimeError:
+            self.fixedDepth = None
+
+        try:
+            self.maxResidual = self.commandline().optionDouble("max-residual")
+        except RuntimeError:
+            self.maxResidual = maxResidual
+
+        try:
+            self.maxRMS = self.commandline().optionDouble("max-rms")
+        except RuntimeError:
+            self.maxRMS = maxRMS
+
+        eventIDs = self.commandline().optionString("event").split()
+        for eventID in eventIDs:
+            self.processEvent(eventID)
+
         return True
 
 

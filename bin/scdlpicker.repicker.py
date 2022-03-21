@@ -523,6 +523,7 @@ class Repicker(ABC):
                 for i, annotation in enumerate(annotations):
                     try:
                         # Associate the annotation to an AdHocPick
+
                         pick = next(filter(
                             lambda p:
                             p.networkCode == annotation.meta.network and
@@ -530,6 +531,7 @@ class Repicker(ABC):
                             p.locationCode == annotation.meta.location,
                             collected_adhoc_picks))
                     except StopIteration:
+                        logger.warning("failed to associate annotation for %s.%s" % (annotation.meta.network, annotation.meta.station))
                         # No AdHocPick could be found that matches the
                         # current annotation. The reason for this could be
                         # a gap in waveform data such that two traces of
