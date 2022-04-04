@@ -20,6 +20,7 @@ import seiscomp.core
 import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.io
+import math
 
 
 def nslc(obj):
@@ -47,6 +48,62 @@ def uncertainty(quantity):
         except:
             err = None
     return err
+
+
+def hasFixedDepth(origin):
+    """
+    If the depth of the given origin is fixed, return True,
+    otherwise return False.
+    """
+    if uncertainty(origin.depth()) in [ None, 0.0 ]:
+        return True
+    return False
+
+
+def sumOfLargestGaps(azi, n=2):
+    """
+    From an unsorted list of azimuth values, determine the
+    largest n gaps and return their sum.
+    """
+
+    gap = []
+    aziCount = len(azi)
+    if aziCount<2:
+        return 360.
+    azi = sorted(azi)
+
+    for i in range(1, aziCount):
+        gap.append(azi[i]-azi[i-1])
+    gap.append(azi[0]-azi[aziCount-1]+360)
+    gap = sorted(gap, reverse=True)
+    return sum(gap[0:n])
+
+
+def computeTGap(origin, maxDelta=180, minWeight=0.5):
+    """
+    Compute the sum of the largest two gaps. Unlike for the well-known
+    secondary azimuthal gap, the TGap does not depend on the number of
+    stations that separate two gaps. Also the two largest gaps don't
+    have to be adjacent.
+    """
+
+    azi = []
+    arrivalCount = origin.arrivalCount()
+    for i in range(arrivalCount):
+        arr = origin.arrival(i)
+        try:
+            azimuth = arr.azimuth()
+            weight  = arr.weight()
+            delta   = arr.distance()
+        except:
+            continue
+        if weight > minWeight and delta < maxDelta:
+            azimuth = math.fmod(azimuth, 360.)
+            if azimuth < 0:
+                azimuth += 360.
+            azi.append(azimuth)
+
+    return sumOfLargestGaps(azi, n=2)
 
 
 def isotimestamp(time, decimals=3):
@@ -161,16 +218,19 @@ def summarize(obj, withPicks=False):
     except ValueError:
         pass
 
+    def pick_time(pick):
+        return pick.time().value()
+
     if withPicks:
-        time_picks = []
+        picks = []
         for arr in ArrivalIterator(obj):
             pickID = arr.pickID()
             pick = seiscomp.datamodel.Pick.Find(pickID)
             if not pick:
                 seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
                 continue
-            time_picks.append((pick.time().value(), pick))
-        for t,pick in sorted(time_picks):
+            picks.append(pick)
+        for pick in sorted(picks, key=pick_time):
             print("  %s" % pick.publicID())
 
 
@@ -190,4 +250,5 @@ def dumpOriginXML(origin, xmlFileName):
     ar.create(xmlFileName)
     ar.writeObject(ep)
     ar.close()
+    origin.detach()
     return True
