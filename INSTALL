@@ -1,9 +1,11 @@
 # Installation
 
-It is a good idea to install scdlpicker along with the SeisComP Python codes.
+It is a good idea but not a requirement to install scdlpicker along with the SeisComP Python codes. The advantage of this is that no special care needs to be taken to properly set the environment variables as the `seiscomp` utility (here: `seiscomp exec`) takes care of that already.
 
-If this Python installation is under $HOME/seiscomp, the installation would require
+If this SeisComP installation is under $HOME/seiscomp, the installation would then require
 
 '''
 ~/seiscomp/bin/seiscomp exec seiscomp-python setup.py install --home=$HOME/seiscomp
 '''
+
+Please note that SeisComP has no versioned Python installation directory. Therefore we need to specify `--home=$HOME/seiscomp` rather than `--prefix=$HOME/seiscomp`.

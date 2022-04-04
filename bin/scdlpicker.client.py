@@ -854,7 +854,6 @@ class OriginStreamApp(seiscomp.client.Application):
 
         if tryUpickedStations:
             # TODO: delay
-            seiscomp.logging.debug("tryUpickedStations A XXX")
             predictedPicks = self.findUnpickedStations(
                 workspace.origin, maxDelta, workspace.all_picks)
             seiscomp.logging.debug("%d predicted picks" % len(predictedPicks))
@@ -864,15 +863,10 @@ class OriginStreamApp(seiscomp.client.Application):
                     if pickID not in workspace.all_picks:
                         workspace.all_picks[pickID] = pick
                         workspace.new_picks[pickID] = pick
-                seiscomp.logging.debug("tryUpickedStations B XXX")
 
-                seiscomp.logging.debug("tryUpickedStations B XXX2")
                 waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
-                seiscomp.logging.debug("tryUpickedStations B XXX3")
                 for streamID in waveforms:
                     workspace.waveforms[streamID] = waveforms[streamID]
-                seiscomp.logging.debug("tryUpickedStations B XXX4")
-                seiscomp.logging.debug("tryUpickedStations C XXX")
 
         # We dump the waveforms to files in order to
         # read them as miniSEED files into ObsPy. This
