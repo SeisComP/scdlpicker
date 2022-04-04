@@ -90,11 +90,12 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
     while True:
         try:
             relocated = loc.relocate(origin)
+            relocated = seiscomp.datamodel.Origin.Cast(relocated)
         except RuntimeError:
             relocated = None
             seiscomp.logging.error("Failed to relocate origin")
 
-        if not relocated:
+        if relocated is None:
             # We sometimes observe that a locator fails to
             # relocate an origin. At the moment we cannot
             # repair that and therefore have to give up. But
@@ -104,40 +105,22 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             scdlpicker.util.dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
                 % (eventID, timestamp))
             seiscomp.logging.error("Giving up")
+            relocated = origin
             break
 
         if fixedDepth is None and \
            relocated.depth().value() < minimumDepth:
+            seiscomp.logging.error("Fixing minimum depth")
             loc.useFixedDepth(True)
             loc.setFixedDepth(minimumDepth)
             relocated = loc.relocate(origin)
+            relocated = seiscomp.datamodel.Origin.Cast(relocated)
             loc.useFixedDepth(False)
 
         if not trimLargestResidual(relocated, maxResidual):
             break
 
         origin = relocated
-
-#       else:
-# FIXME: This currently segfaults:
-#           seiscomp.logging.debug("XXX AAA 1")
-#           if fixedDepth is None:
-#               seiscomp.logging.debug("XXX AAA 2")
-#               loc.useFixedDepth(True)
-#               seiscomp.logging.debug("XXX AAA 3")
-#               loc.setFixedDepth(minimumDepth)
-#               seiscomp.logging.debug("XXX AAA 4")
-#               try:
-#                   seiscomp.logging.debug("XXX AAA 5")
-#                   relocated = loc.relocate(origin)
-#                   seiscomp.logging.debug("XXX AAA 6")
-#               except RuntimeError:
-#                   seiscomp.logging.error("Failed to relocate with fixed depth")
-#                   seiscomp.logging.error("Giving up")
-#                   relocated = None
-#               seiscomp.logging.debug("XXX AAA 7")
-#               loc.useFixedDepth(False)
-
 
     if not relocated:
         return
