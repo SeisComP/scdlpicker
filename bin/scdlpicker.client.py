@@ -96,21 +96,6 @@ def computeTravelTimes(delta, depth):
     return arrivals
 
 
-def statusFlag(obj):
-    """
-    If the object is 'manual', return 'M' otherwise 'A'.
-    """
-    try:
-        if obj.evaluationMode() == seiscomp.datamodel.MANUAL:
-            return "M"
-    except:
-        pass
-    return "A"
-
-
-def manual(obj):
-    return statusFlag(obj) == 'M'
-
 
 def alreadyRepicked(pick):
     if pick.publicID().endswith("/repicked"):
@@ -668,7 +653,7 @@ class OriginStreamApp(seiscomp.client.Application):
                 except AssertionError:
                     continue
 
-                if manual(origin) and skipManualOrigins is True:
+                if scdlpicker.util.manual(origin) and skipManualOrigins is True:
                     logging.debug("Skipping manual origin " + origin.publicID())
                     continue
 
@@ -793,7 +778,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
             # We usually don't re-pick manual picks.
             # Perhaps add option to allow that.
-            if manual(pick):
+            if scdlpicker.util.manual(pick):
                 continue
             
             if alreadyRepicked(pick): 

@@ -18,7 +18,7 @@
 
 import seiscomp.datamodel
 import seiscomp.logging
-
+import scdlpicker.util
 
 def loadEvent(query, evid):
     """
@@ -37,9 +37,9 @@ def loadEvent(query, evid):
     return event
 
 
-def loadOrigin(query, orid, strip=False):
+def loadOriginWithoutArrivals(query, orid, strip=False):
     """
-    Retrieve origin from DB without children
+    Retrieve origin from DB *without* children
     
     Returns either the origin instance
     or None if origin could not be loaded.
@@ -65,7 +65,7 @@ def loadMagnitude(query, orid):
     return seiscomp.datamodel.Magnitude.Cast(obj)
 
 
-def loadPicksForTimespan(query, startTime, endTime, withAmplitudes=False):
+def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplitudes=False):
     """
     Load from the database all picks within the given time span. If specified,
     also all amplitudes that reference any of these picks may be returned.
@@ -75,6 +75,8 @@ def loadPicksForTimespan(query, startTime, endTime, withAmplitudes=False):
     for obj in query.getPicks(startTime, endTime):
         pick = seiscomp.datamodel.Pick.Cast(obj)
         if pick:
+            if scdlpicker.util.authorOf(pick) not in allowedAuthorIDs:
+                continue
             objects[pick.publicID()] = pick
 
     pickCount = len(objects)
@@ -96,3 +98,70 @@ def loadPicksForTimespan(query, startTime, endTime, withAmplitudes=False):
     seiscomp.logging.debug("loaded %d amplitudes" % amplitudeCount)
 
     return objects
+
+
+
+def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
+    etime = origin.time().value()
+    elat = origin.latitude().value()
+    elon = origin.longitude().value()
+    edep = origin.depth().value()
+
+    # clear all arrivals
+    while origin.arrivalCount():
+        origin.removeArrival(0)
+
+    # uses the iasp91 tables by default
+    ttt = seiscomp.seismology.TravelTimeTable()
+
+    # retrieve a dict of station instances from inventory
+    station = scdlpicker.inventory.getStations(inventory, etime)
+
+    startTime = origin.time().value()
+    endTime = startTime + seiscomp.core.TimeSpan(1200.)
+    picks = scdlpicker.dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
+    result = []
+    for pickID in picks:
+        pick = picks[pickID]
+
+        n,s,l,c = scdlpicker.util.nslc(pick)
+        try:
+            sta = station[n,s]
+        except KeyError as e:
+            seiscomp.logging.error(str(e))
+            continue
+
+        slat = sta.latitude()
+        slon = sta.longitude()
+
+        delta, az, baz = seiscomp.math.delazi_wgs84(elat, elon, slat, slon)
+
+        ttimes = ttt.compute(0, 0, edep, 0, delta, 0, 0)
+        ptime = ttimes[0]
+
+        theo = etime + seiscomp.core.TimeSpan(ptime.time)
+        dt = float(pick.time().value() - theo)
+
+        maxDelta = scdlpicker.defaults.maxDelta
+        maxResidual = scdlpicker.defaults.maxResidual
+
+        # initially we grab more picks than within the final
+        # residual range and trim the residuals later.
+        if -2*maxResidual < dt < 2*maxResidual:
+            result.append(pick)
+
+            phase = seiscomp.datamodel.Phase()
+            phase.setCode("P")
+            arr = seiscomp.datamodel.Arrival()
+            arr.setPhase(phase)
+            arr.setPickID(pickID)
+            arr.setTimeUsed(delta <= maxDelta)
+            arr.setWeight(1.)
+            origin.add(arr)
+
+    for arr in scdlpicker.util.ArrivalIterator(origin):
+        pickID = arr.pickID()
+        if not seiscomp.datamodel.Pick.Find(pickID):
+            seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
+
+    return origin, result

@@ -23,6 +23,16 @@ import seiscomp.io
 import math
 
 
+
+def arrivalCount(org, minArrivalWeight=0.5):
+    count = 0
+    for i in range(org.arrivalCount()):
+        arr = org.arrival(i)
+        if arr.weight() >= minArrivalWeight:
+            count += 1
+    return count
+
+
 def nslc(obj):
     """
     Convenience function to retrieve network, station, location and
@@ -48,6 +58,13 @@ def uncertainty(quantity):
         except:
             err = None
     return err
+
+
+def authorOf(obj):
+    try:
+        return obj.creationInfo().author()
+    except:
+        return None
 
 
 def hasFixedDepth(origin):
@@ -252,3 +269,52 @@ def dumpOriginXML(origin, xmlFileName):
     ar.close()
     origin.detach()
     return True
+
+
+def statusFlag(obj):
+    """
+    If the object is 'manual', return 'M' otherwise 'A'.
+    """
+    try:
+        if obj.evaluationMode() == seiscomp.datamodel.MANUAL:
+            return "M"
+    except:
+        pass
+    return "A"
+
+
+def manual(obj):
+    return statusFlag(obj) == 'M'
+
+
+def qualified(origin):
+    # Check whether an origin meets certain criteria.
+    #
+    # This is work in progress and currently very specific to
+    # the global monitoring at GFZ. In other contexts this test
+    # may have to be adapted or skipped.
+
+    if manual(origin):
+        return True
+
+    if origin.arrivalCount() > 0:
+        # Ensure sufficient azimuthal coverage. 
+        TGap = computeTGap(origin, maxDelta=90)
+        if TGap > 270:
+            seiscomp.logging.debug("Origin %s TGap=%.1f" % (origin.publicID(), TGap))
+            return False
+
+    return True
+
+
+def creationInfo(author, agencyID, time=None):
+    if not time:
+        now = seiscomp.core.Time.GMT()
+        time = now
+    ci = seiscomp.datamodel.CreationInfo()
+    ci.setAuthor(author)
+    ci.setAgencyID(agencyID)
+    ci.setCreationTime(time)
+    ci.setModificationTime(time)
+    return ci
+

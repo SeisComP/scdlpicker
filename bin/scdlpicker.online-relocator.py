@@ -39,49 +39,15 @@ import scdlpicker.dbutil
 import scdlpicker.util
 import scdlpicker.inventory
 import scdlpicker.relocation
+import scdlpicker.defaults
 
-
-maxResidual = 2.5
-maxRMS = 1.7
-
-
-def authorOf(obj):
-    try:
-        return obj.creationInfo().author()
-    except:
-        return None
-
-
-def arrivalCount(org, minArrivalWeight=0.5):
-    count = 0
-    for i in range(org.arrivalCount()):
-        arr = org.arrival(i)
-        if arr.weight() >= minArrivalWeight:
-            count += 1
-    return count
 
 
 def quality(origin):
     # similar role of origin score in scautoloc
 
-    return arrivalCount(origin) # to be improved 
+    return scdlpicker.util.arrivalCount(origin) # to be improved 
 
-
-def qualified(origin):
-    # Check whether an origin meets certain criteria.
-    #
-    # This is work in progress and currently very specific to
-    # the global monitoring at GFZ. In other contexts this test
-    # may have to be adapted or skipped.
-
-    if origin.arrivalCount() > 0:
-        # Ensure sufficient azimuthal coverage. 
-        TGap = scdlpicker.util.computeTGap(origin, maxDelta=90)
-        if TGap > 270:
-            seiscomp.logging.debug("Origin %s TGap=%.1f" % (origin.publicID(), TGap))
-            return False
-
-    return True
 
 
 class RelocatorApp(seiscomp.client.Application):
@@ -95,8 +61,10 @@ class RelocatorApp(seiscomp.client.Application):
         self.addMessagingSubscription("LOCATION")
         self.addMessagingSubscription("EVENT")
 
-        self.minimumDepth = 10.
-        self.maxResidual = 2.5
+        self.minimumDepth = scdlpicker.defaults.minimumDepth
+        self.maxResidual = scdlpicker.defaults.maxResidual
+
+        self.allowedAuthorIDs = scdlpicker.defaults.allowedAuthorIDs
 
         # Keep track of changes of the preferred origin of each event
         self.preferredOrigins = dict()
@@ -157,7 +125,7 @@ class RelocatorApp(seiscomp.client.Application):
                 self.processEvent(eventID)
 
 
-    def readyToProcess(self, eventID, minDelay=1200):
+    def readyToProcess(self, eventID, minDelay=1080):
         if not eventID in self.pendingEvents:
             seiscomp.logging.error("Missing event "+eventID)
             return False
@@ -165,7 +133,7 @@ class RelocatorApp(seiscomp.client.Application):
         preferredOriginID = evt.preferredOriginID()
         if preferredOriginID not in self.origins:
             seiscomp.logging.debug("Loading origin "+preferredOriginID)
-            org = scdlpicker.dbutil.loadOrigin(self.query(), preferredOriginID)
+            org = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), preferredOriginID)
             if not org:
                 return False
             self.origins[preferredOriginID] = org
@@ -188,7 +156,7 @@ class RelocatorApp(seiscomp.client.Application):
             del self.pendingEvents[eventID]
             return False
 
-        if not qualified(org):
+        if not scdlpicker.util.qualified(org):
             seiscomp.logging.debug("Unqualified origin "+preferredOriginID+" rejected")
             del self.pendingEvents[eventID]
             return False
@@ -261,76 +229,13 @@ class RelocatorApp(seiscomp.client.Application):
             return
 
 
-    def loadPicks(self, origin, allowedAuthorIDs):
-        etime = origin.time().value()
-        elat = origin.latitude().value()
-        elon = origin.longitude().value()
-
-        # clear all arrivals
-        while origin.arrivalCount():
-            origin.removeArrival(0)
-
-        # uses the iasp91 tables by default
-        ttt = seiscomp.seismology.TravelTimeTable()
-
-        station = dict()
-        for item in scdlpicker.inventory.InventoryIterator(self.inventory, time=etime):
-            net, sta, loc, stream = item
-            n = net.code()
-            s = sta.code()
-            if (n,s) in station:
-                continue
-            station[n,s] = sta
-
-        startTime = origin.time().value()
-        endTime = startTime + seiscomp.core.TimeSpan(960.)
-        picks = scdlpicker.dbutil.loadPicksForTimespan(self.query(), startTime, endTime)	
-        result = []
-        for pickID in picks:
-            pick = picks[pickID]
-            if authorOf(pick) not in allowedAuthorIDs:
-                continue
-            n,s,l,c = scdlpicker.util.nslc(pick)
-            try:
-                sta = station[n,s]
-            except KeyError as e:
-                seiscomp.logging.error(str(e))
-                continue
-            slat = sta.latitude()
-            slon = sta.longitude()
-
-            delta, az, baz = seiscomp.math.delazi_wgs84(elat, elon, slat, slon)
-
-            arrivals = ttt.compute(0, 0, origin.depth().value(), 0, delta, 0, 0)
-            arr = arrivals[0]
-
-            theo = etime + seiscomp.core.TimeSpan(arr.time)
-            dt = float(pick.time().value() - theo)
-
-            maxDelta = 95.
-
-            # initially we grab more picks than within the final
-            # residual range and trim the residuals later.
-            if -2*maxResidual < dt < 2*maxResidual:
-                result.append(pick)
-
-                phase = seiscomp.datamodel.Phase()
-                phase.setCode("P")
-                arr = seiscomp.datamodel.Arrival()
-                arr.setPhase(phase)
-                arr.setPickID(pickID)
-                arr.setTimeUsed(delta <= maxDelta)
-                arr.setWeight(1.)
-                origin.add(arr)
-
-        return origin, result
-
-
     def processEvent(self, eventID):
         seiscomp.logging.info("Working on event "+eventID)
 
         event  = scdlpicker.dbutil.loadEvent(self.query(), eventID)
-        origin = scdlpicker.dbutil.loadOrigin(self.query(), event.preferredOriginID())
+        seiscomp.logging.debug("Loaded event "+eventID)
+        origin = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
+        seiscomp.logging.debug("Loaded origin "+origin.publicID())
 
         # adopt fixed depth according to incoming origin
         defaultDepth = 10. # FIXME: no fixed 10 km here
@@ -344,25 +249,16 @@ class RelocatorApp(seiscomp.client.Application):
             seiscomp.logging.debug("not fixing depth")
 
         # Load all picks for a matching time span, independent of association. 
-        origin, picks = self.loadPicks(origin, allowedAuthorIDs=["dlpicker"])
+        origin, picks = scdlpicker.dbutil.loadPicksForOrigin(origin, self.inventory, self.allowedAuthorIDs, self.query())
 
-        for arr in scdlpicker.util.ArrivalIterator(origin):
-            pickID = arr.pickID()
-            if not seiscomp.datamodel.Pick.Find(pickID):
-                seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
-
-        relocated = scdlpicker.relocation.relocate(origin, eventID, fixedDepth, self.minimumDepth, self.maxResidual)
+        relocated = scdlpicker.relocation.relocate(
+            origin, eventID, fixedDepth, self.minimumDepth, self.maxResidual)
         if not relocated:
             seiscomp.logging.warning("%s: relocation failed" % eventID)
             return
 
-        now = seiscomp.core.Time.GMT()
-        crea = seiscomp.datamodel.CreationInfo()
-        crea.setAuthor(self.author)
-        crea.setAgencyID(self.agencyID)
-        crea.setCreationTime(now)
-        crea.setModificationTime(now)
-        relocated.setCreationInfo(crea)
+        ci = scdlpicker.util.creationInfo(self.author, self.agencyID)
+        relocated.setCreationInfo(ci)
         relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
         self.origins[relocated.publicID()] = relocated
 
@@ -414,12 +310,12 @@ class RelocatorApp(seiscomp.client.Application):
         try:
             self.maxResidual = self.commandline().optionDouble("max-residual")
         except RuntimeError:
-            self.maxResidual = maxResidual
+            self.maxResidual = scdlpicker.defaults.maxResidual
 
         try:
             self.maxRMS = self.commandline().optionDouble("max-rms")
         except RuntimeError:
-            self.maxRMS = maxRMS
+            self.maxRMS = scdlpicker.defaults.maxRMS
 
         try:
             eventIDs = self.commandline().optionString("event").split()

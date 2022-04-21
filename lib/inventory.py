@@ -83,3 +83,20 @@ def findStation(inventory, nslc, time):
         # return first-matching station object
         if network.code() == net and station.code() == sta:
             return station
+
+
+def getStations(inventory, time):
+    # retrieve a dict of station instances from inventor
+    # from which we can access the stations via station and network
+    # code
+
+    d = dict()
+    for item in InventoryIterator(inventory, time):
+        net, sta, loc, stream = item
+        n = net.code()
+        s = sta.code()
+        if (n,s) in d:
+            continue
+        d[n,s] = sta
+    return d
+
