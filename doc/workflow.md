@@ -16,7 +16,7 @@ For pragmatic reasons the workflow was split in two parts.
   to disk to be picked up by the SeisComP client `scdlpicker.client.py`.
 
 Information exchange between these two programs is done in a rather
-primitive yet robust way.
+primitive yet robust way. (Note that in the following the term _automatic picks_ refers to the picks by the configured SeisComP automatic picker.)
 
 * All data needed to perform the repicking, both waveforms and
   parametric data, are stored in files within a user-confugurable
