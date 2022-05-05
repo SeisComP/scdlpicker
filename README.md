@@ -48,9 +48,9 @@ You need to have installed SeisBench previously.
 
 ## Disclaimer
 
-This package is work in progress and provided "as is" in the hope that some users will find it useful for their work. No guarantee can be given that it will work in all circumstances or produce improved results. Interfaces may change without notice. Especially the YAML interface between the two main modules is rather ad hoc and will likely be modified, which is will be no problem as long as no other modules depend on the details.
+This package is work in progress and provided "as is" in the hope that some users will find it useful for their work. No guarantee can be given that it will work in all circumstances or produce improved results. Interfaces may change without notice. Especially the YAML interface between the two main modules is rather ad hoc and will likely be modified, which should cause no change in the user experience,  as long as no other modules depend on the details.
 
-The package is not intended to be a turn-key solution and no support can be provided. Feedback in the form of bug reports or enhancement is of course greatly appreciated.
+The package is not intended to be a turn-key solution and no support can be provided. Feedback in the form of bug reports or enhancement suggestions is of course greatly appreciated.
 
 
 ## Authors & Acknowlegements
@@ -60,9 +60,9 @@ The DL repicker was written by [Joachim Saul](saul@gfz-potsdam.de) and Thomas Bo
 
 Reference publications for SeisBench:
 
-* [SeisBench - A Toolbox for Machine Learning in Seismology](https://arxiv.org/abs/2111.00786)
+* [SeisBench - A Toolbox for Machine Learning in Seismology](https://doi.org/10.1785/0220210324)
 
-  _Reference publication for software (pre-print)._
+  _Reference publication for software ([pre-print](https://arxiv.org/abs/2111.00786))._
 
 
 * [Which picker fits my data? A quantitative evaluation of deep learning based seismic pickers](https://doi.org/10.1029/2021JB023499)
