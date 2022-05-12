@@ -16,7 +16,7 @@ maxResidual = 2.5
 maxRMS = 1.7
 
 
-maxDelta = 95.
+maxDelta = 105.
 
 
 # List of allowed pick authors.
