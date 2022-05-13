@@ -40,6 +40,7 @@ class EventWorkspace:
         # but have not received
         # self.pending = dict()
 
+
     def writePicksToYAML(self, yamlFileName):
         picks = []
         for key in self.all_picks:
@@ -58,6 +59,23 @@ class EventWorkspace:
 
         with open(yamlFileName, 'w') as file:
             yaml.dump(picks, file)
+
+
+    def writeWaveformsToMiniSeed(self, eventRootDir="events", overwrite=True):
+        eventID = self.event.publicID()
+        eventDir = os.path.join(eventRootDir, eventID, "waveforms")
+        if not os.path.exists(eventDir):
+            os.makedirs(eventDir)
+        for key in self.waveforms:
+            mseedFileName = os.path.join(eventDir, key+".mseed")
+            # We normally do want to overwrite data because there
+            # may be additional records now.
+            if os.path.exists(mseedFileName) and not overwrite:
+                continue
+            with open(mseedFileName, "wb") as f:
+                for rec in self.waveforms[key]:
+                    f.write(rec.raw().str())
+
 
     def dump(self, eventRootDir="events", spoolDir="spool"):
         """
@@ -84,7 +102,7 @@ class EventWorkspace:
         os.makedirs(eventDir, exist_ok=True)
 
         # first dump waveforms
-        self.dump_waveforms(eventRootDir=eventRootDir)
+        self.writeWaveformsToMiniSeed(eventRootDir=eventRootDir)
 
         # then dump yaml
         timestamp = isotimestamp(self.origin.creationInfo().creationTime())
@@ -105,17 +123,3 @@ class EventWorkspace:
 
         return True if not error else False
 
-    def dump_waveforms(self, eventRootDir="events", overwrite=True):
-        eventID = self.event.publicID()
-        eventDir = os.path.join(eventRootDir, eventID, "waveforms")
-        if not os.path.exists(eventDir):
-            os.makedirs(eventDir)
-        for key in self.waveforms:
-            mseedFileName = os.path.join(eventDir, key+".mseed")
-            # We normally do want to overwrite data because there
-            # may be additional records now.
-            if os.path.exists(mseedFileName) and not overwrite:
-                continue
-            with open(mseedFileName, "wb") as f:
-                for rec in self.waveforms[key]:
-                    f.write(rec.raw().str())

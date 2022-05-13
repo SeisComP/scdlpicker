@@ -29,8 +29,6 @@ import scdlpicker.inventory
 import scdlpicker.util
 import scdlpicker.eventworkspace
 
-from seiscomp import logging
-
 from seiscomp.datamodel import \
     EventParameters, Event, Origin, Pick, \
     Notifier, \
@@ -318,77 +316,26 @@ class OriginStreamApp(seiscomp.client.Application):
             return False
 
         self.setupFolders()
-
         self.setupComponents()
-        self.configuredStreams = self._getConfiguredStreams()
+
+        configModule = self.configModule()
+        myName = self.name()
+        self.configuredStreams = \
+            scdlpicker.util.configuredStreams(configModule, myName)
 
         return True
 
 
     def handleTimeout(self):
 
-        self.pollResults()
+        self.pollRepickerResults()
+        self.processPendingEvents()
 
+
+    def processPendingEvents(self):
         for eventID in sorted(self.pendingEvents.keys()):
             event = self.pendingEvents.pop(eventID)
             self.processEvent(event)
-
-
-    def _getConfiguredStreams(self):
-        # determine which streams are configured for picking
-        # according to "detecStream" and "detecLocid".
-        items = []
-
-        mod = self.configModule()
-        me = self.name()
-
-        # iterate over all configured stations
-        for i in range(mod.configStationCount()):
-            # config for one station
-            cfg = mod.configStation(i)
-
-            net, sta = cfg.networkCode(), cfg.stationCode()
-            logging.debug("Config  %s  %s" % (net, sta))
-
-            # client-specific setup for this station
-            setup = seiscomp.datamodel.findSetup(cfg, me, True)
-            if not setup:
-                logging.debug("no setup found")
-                continue
-
-            # break setup down do a set of parameters
-            paramSet = setup.parameterSetID()
-            logging.debug("paramSet "+paramSet)
-            params = seiscomp.datamodel.ParameterSet.Find(paramSet)
-            if not params:
-                logging.debug("no params found")
-                continue
-
-            # search for "detecStream" and "detecLocid"
-            detecStream, detecLocid = None, ""
-            # We cannot look them up by name, therefore need
-            # to check all available parameters.
-            for k in range(params.parameterCount()):
-                param = params.parameter(k)
-                logging.debug("Config  %s  %s - %s %s"
-                    % (net, sta, param.name(), param.value()))
-                if param.name() == "detecStream":
-                    detecStream = param.value()
-                elif param.name() == "detecLocid":
-                    detecLocid = param.value()
-            if not detecStream:
-                # ignore stations without detecStream
-                logging.debug("no detecStream found")
-                continue
-
-            # this may fail for future FDSN stream names
-            if detecLocid == "":
-                detecLocid = "--"
-            item = (net, sta, detecLocid, detecStream[:2])
-            logging.debug("Config  %s  %s %s" % (net, sta, str(item)))
-            items.append(item)
-
-        return items
 
 
     def findUnpickedStations(self, origin, maxDelta, picks):
@@ -396,7 +343,7 @@ class OriginStreamApp(seiscomp.client.Application):
         Find stations within maxDelta from origin which are not
         represented by any of the specified picks.
         """
-        logging.debug("findUnpickedStations for maxDelta=%g" % maxDelta)
+        seiscomp.logging.debug("findUnpickedStations for maxDelta=%g" % maxDelta)
         elat = origin.latitude().value()
         elon = origin.longitude().value()
 
@@ -448,7 +395,7 @@ class OriginStreamApp(seiscomp.client.Application):
             predictedPick.setWaveformID(wfid)
             # We do not set the creation info here.
             if pickID not in predictedPicks:
-                logging.debug("predicted pick %s" % pickID)
+                seiscomp.logging.debug("predicted pick %s" % pickID)
                 predictedPicks[pickID] = predictedPick
         return predictedPicks
 
@@ -489,7 +436,7 @@ class OriginStreamApp(seiscomp.client.Application):
         obj = self.query().loadObject(tp.TypeInfo(), publicID)
         obj = tp.Cast(obj)
         if obj is None:
-            logging.error("unknown Event '%s'" % publicID)
+            seiscomp.logging.error("unknown Event '%s'" % publicID)
         return obj
 
 
@@ -499,7 +446,7 @@ class OriginStreamApp(seiscomp.client.Application):
         obj = self.query().loadObject(tp.TypeInfo(), publicID)
         obj = tp.Cast(obj)
         if obj is None:
-            logging.error("unknown Origin '%s'" % publicID)
+            seiscomp.logging.error("unknown Origin '%s'" % publicID)
         return obj
 
 
@@ -540,7 +487,7 @@ class OriginStreamApp(seiscomp.client.Application):
             datarequest.append((t1, t2, net, sta, loc, cha))
             t1 = scdlpicker.util.isotimestamp(t1)
             t2 = scdlpicker.util.isotimestamp(t2)
-            logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
+            seiscomp.logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
                 % (net, sta, loc, cha, t1, t2))
 
         waveforms = dict()
@@ -550,7 +497,7 @@ class OriginStreamApp(seiscomp.client.Application):
             return waveforms  # empty
 
         # request waveforms and dump them to one file per stream
-        logging.info("RecordStream start")
+        seiscomp.logging.info("RecordStream start")
         stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
         stream.setTimeout(streamTimeout)
         streamCount = 0
@@ -566,7 +513,7 @@ class OriginStreamApp(seiscomp.client.Application):
                 _loc = "" if loc == "--" else loc
                 stream.addStream(net, sta, _loc, cha[:2] + c, t1, t2)
                 streamCount += 1
-        logging.info("RecordStream: requested %d streams" % streamCount)
+        seiscomp.logging.info("RecordStream: requested %d streams" % streamCount)
         for rec in scdlpicker.util.RecordIterator(stream):
             if not rec.streamID() in waveforms:
                 waveforms[rec.streamID()] = []
@@ -576,7 +523,7 @@ class OriginStreamApp(seiscomp.client.Application):
         count = 0
         for key in waveforms:
             count += len(waveforms[key])
-        logging.debug("RecordStream: received  %d records for %d streams"
+        seiscomp.logging.debug("RecordStream: received  %d records for %d streams"
             % (count, len(waveforms.keys())))
 
         # remove gappy streams
@@ -585,7 +532,7 @@ class OriginStreamApp(seiscomp.client.Application):
             if gappy(waveforms[streamID], tolerance=1.):
                 gappyStreams.append(streamID)
         for streamID in gappyStreams:
-            logging.warning("Gappy stream "+streamID+" ignored")
+            seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
             del waveforms[streamID]
 
         # determine streams for which we don't have 3 components
@@ -602,7 +549,7 @@ class OriginStreamApp(seiscomp.client.Application):
             if len(streamIDs[nsl]) < 3:
                 for streamID in streamIDs[nsl]:
                     del waveforms[streamID]
-                    logging.warning("Incomplete stream "+streamID+" ignored")
+                    seiscomp.logging.warning("Incomplete stream "+streamID+" ignored")
 
         self.acquisitionInProgress = False
         return waveforms
@@ -623,10 +570,10 @@ class OriginStreamApp(seiscomp.client.Application):
         # load event and preferred origin
         event = self._loadEvent(eventID)
         if not event:
-            logging.error("Failed to load event "+eventID)
+            seiscomp.logging.error("Failed to load event "+eventID)
             return False
 
-        logging.debug("Loaded event "+eventID)
+        seiscomp.logging.debug("Loaded event "+eventID)
 
         workspace = self.workspaces[eventID] = scdlpicker.eventworkspace.EventWorkspace()
         workspace.event = event
@@ -654,7 +601,7 @@ class OriginStreamApp(seiscomp.client.Application):
                     continue
 
                 if scdlpicker.util.manual(origin) and skipManualOrigins is True:
-                    logging.debug("Skipping manual origin " + origin.publicID())
+                    seiscomp.logging.debug("Skipping manual origin " + origin.publicID())
                     continue
 
                 tmp_origins.append(origin)
@@ -680,7 +627,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
                 origins.append(origin)
 
-        logging.debug("Loaded %d origin(s)" % len(origins))
+        seiscomp.logging.debug("Loaded %d origin(s)" % len(origins))
 
         sorted_origins = sorted(
             origins, key=lambda origin: origin.creationInfo().creationTime())
@@ -733,15 +680,16 @@ class OriginStreamApp(seiscomp.client.Application):
             return True
 
         originID = origin.publicID()
+        eventID = event.publicID()
 
         # Ignore origins without any arrivals except if this origin
         # is explicitly white listed
         if origin.arrivalCount() == 0:
             if origin.creationInfo().agencyID() not in emptyOriginAgencyIDs:
-                logging.debug("No arrivals in origin "+originID +" -> skipped")
+                seiscomp.logging.debug("No arrivals in origin "+originID +" -> skipped")
                 return
 
-        logging.debug("processing origin "+originID)
+        seiscomp.logging.debug("processing origin "+originID+" of event "+eventID)
 
         now = seiscomp.core.Time.GMT()
 
@@ -772,7 +720,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
             pickID = pick.publicID()
             # if pickID in workspace.mlpicks:
-            #     logging.debug("I already have a DL pick for "+pickID)
+            #     seiscomp.logging.debug("I already have a DL pick for "+pickID)
             if pickID not in workspace.all_picks:
                 workspace.all_picks[pickID] = pick
 
@@ -784,17 +732,17 @@ class OriginStreamApp(seiscomp.client.Application):
             if alreadyRepicked(pick): 
                 continue
 
-            logging.debug("adding new pick "+pickID)
+            seiscomp.logging.debug("adding new pick "+pickID)
             workspace.new_picks[pickID] = pick
 
         try:
             magnitudeID = event.preferredMagnitudeID()
         except ValueError:
-            logging.warning("Event.preferredMagnitudeID not set")
+            seiscomp.logging.warning("Event.preferredMagnitudeID not set")
             return
 
         tmp = "%d" % len(workspace.new_picks) if workspace.new_picks else "no"
-        logging.debug(tmp+" new picks")
+        seiscomp.logging.debug(tmp+" new picks")
 
         waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
         for streamID in waveforms:
@@ -877,7 +825,7 @@ class OriginStreamApp(seiscomp.client.Application):
         originID = event.preferredOriginID()
         if workspace.origin:
             if originID == workspace.origin.publicID():
-                logging.debug(
+                seiscomp.logging.debug(
                     "Event "+eventID+": no change of preferred origin")
                 return
         origin = self._loadOrigin(originID)
@@ -953,7 +901,7 @@ class OriginStreamApp(seiscomp.client.Application):
         return picks
 
 
-    def pollResults(self):
+    def pollRepickerResults(self):
         """
         Check if the repicker module has produced new results.
 
@@ -969,7 +917,7 @@ class OriginStreamApp(seiscomp.client.Application):
             todolist.append(path)
 
         for path in sorted(todolist):
-            logging.info("pollResults: working on "+path)
+            seiscomp.logging.info("pollRepickerResults: working on "+path)
             picks = self.readResults(path)
 
             ep = EventParameters()
@@ -981,10 +929,10 @@ class OriginStreamApp(seiscomp.client.Application):
             Notifier.Disable()
             if self.connection().send(msg):
                 for pickID in picks:
-                    logging.info("sent "+pickID)
+                    seiscomp.logging.info("sent "+pickID)
             else:
                 for pickID in picks:
-                    logging.info("failed to send "+pickID)
+                    seiscomp.logging.info("failed to send "+pickID)
             d, f = os.path.split(path)
             sent = os.path.join(self.sentDir, f)
             os.rename(path, sent)
@@ -1001,7 +949,7 @@ class OriginStreamApp(seiscomp.client.Application):
             eventID = None
 
         if eventID:
-            logging.info("In single-event mode. Event is "+eventID)
+            seiscomp.logging.info("In single-event mode. Event is "+eventID)
             return self.testEvent(eventID)
 
         # enter real-time mode

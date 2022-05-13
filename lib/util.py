@@ -318,3 +318,62 @@ def creationInfo(author, agencyID, time=None):
     ci.setModificationTime(time)
     return ci
 
+
+
+def configuredStreams(configModule, myName):
+
+    # Determine which streams are configured for picking
+    # according to "detecStream" and "detecLocid".
+    #
+    # Returns a list of (net, sta, detecLocid, detecStream[:2])
+    # for all found items.
+    items = []
+
+    # loop over all configured stations
+    for i in range(configModule.configStationCount()):
+        # config for one station
+        cfg = configModule.configStation(i)
+
+        net, sta = cfg.networkCode(), cfg.stationCode()
+        seiscomp.logging.debug("Config  %s  %s" % (net, sta))
+
+        # client-specific setup for this station
+        setup = seiscomp.datamodel.findSetup(cfg, myName, True)
+        if not setup:
+            seiscomp.logging.debug("no setup found")
+            continue
+
+        # break setup down do a set of parameters
+        paramSet = setup.parameterSetID()
+        seiscomp.logging.debug("paramSet "+paramSet)
+        params = seiscomp.datamodel.ParameterSet.Find(paramSet)
+        if not params:
+            seiscomp.logging.debug("no params found")
+            continue
+
+        # search for "detecStream" and "detecLocid"
+        detecStream, detecLocid = None, ""
+        # We cannot look them up by name, therefore need
+        # to check all available parameters.
+        for k in range(params.parameterCount()):
+            param = params.parameter(k)
+            seiscomp.logging.debug("Config  %s  %s - %s %s"
+                % (net, sta, param.name(), param.value()))
+            if param.name() == "detecStream":
+                detecStream = param.value()
+            elif param.name() == "detecLocid":
+                detecLocid = param.value()
+        if not detecStream:
+            # ignore stations without detecStream
+            seiscomp.logging.debug("no detecStream found")
+            continue
+
+        # this may fail for future FDSN stream names
+        if detecLocid == "":
+            detecLocid = "--"
+        item = (net, sta, detecLocid, detecStream[:2])
+        seiscomp.logging.debug("Config  %s  %s %s" % (net, sta, str(item)))
+        items.append(item)
+
+    return items
+

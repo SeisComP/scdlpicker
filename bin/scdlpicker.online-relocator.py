@@ -133,7 +133,8 @@ class RelocatorApp(seiscomp.client.Application):
         preferredOriginID = evt.preferredOriginID()
         if preferredOriginID not in self.origins:
             seiscomp.logging.debug("Loading origin "+preferredOriginID)
-            org = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), preferredOriginID)
+            org = scdlpicker.dbutil.loadOriginWithoutArrivals(
+                        self.query(), preferredOriginID)
             if not org:
                 return False
             self.origins[preferredOriginID] = org
@@ -147,17 +148,20 @@ class RelocatorApp(seiscomp.client.Application):
         try:
             author = org.creationInfo().author()
         except:
-            seiscomp.logging.warning("Author missing in origin %s" % preferredOriginID)
+            seiscomp.logging.warning(
+                "Author missing in origin %s" % preferredOriginID)
             author = "MISSING"
         ownOrigin = (author == self.author)
 
         if ownOrigin:
-            seiscomp.logging.debug("I made origin "+preferredOriginID+" (nothing to do)")
+            seiscomp.logging.debug(
+                "I made origin "+preferredOriginID+" (nothing to do)")
             del self.pendingEvents[eventID]
             return False
 
         if not scdlpicker.util.qualified(org):
-            seiscomp.logging.debug("Unqualified origin "+preferredOriginID+" rejected")
+            seiscomp.logging.debug(
+                "Unqualified origin "+preferredOriginID+" rejected")
             del self.pendingEvents[eventID]
             return False
 
@@ -195,6 +199,7 @@ class RelocatorApp(seiscomp.client.Application):
                 common[pickID] = picks1[pickID]
             else:
                 only1[pickID] = picks1[pickID]
+
         for pickID in picks2:
             if pickID not in picks1:
                 only2[pickID] = picks2[pickID]
@@ -249,10 +254,13 @@ class RelocatorApp(seiscomp.client.Application):
             seiscomp.logging.debug("not fixing depth")
 
         # Load all picks for a matching time span, independent of association. 
-        origin, picks = scdlpicker.dbutil.loadPicksForOrigin(origin, self.inventory, self.allowedAuthorIDs, self.query())
+        originWithArrivals, picks = scdlpicker.dbutil.loadPicksForOrigin(
+                        origin, self.inventory, self.allowedAuthorIDs,
+                        self.query())
 
         relocated = scdlpicker.relocation.relocate(
-            origin, eventID, fixedDepth, self.minimumDepth, self.maxResidual)
+                        originWithArrivals, eventID, fixedDepth,
+                        self.minimumDepth, self.maxResidual)
         if not relocated:
             seiscomp.logging.warning("%s: relocation failed" % eventID)
             return
@@ -266,7 +274,8 @@ class RelocatorApp(seiscomp.client.Application):
         if eventID in self.relocated:
             # if quality(relocated) <= quality(self.relocated[eventID]):
             if not self.improvement(self.relocated[eventID], relocated):
-                seiscomp.logging.info("%s: no improvement - origin not sent" % eventID)
+                seiscomp.logging.info(
+                    "%s: no improvement - origin not sent" % eventID)
                 return
 
         ep = seiscomp.datamodel.EventParameters()
