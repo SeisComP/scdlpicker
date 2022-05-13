@@ -120,11 +120,28 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
     startTime = origin.time().value()
     endTime = startTime + seiscomp.core.TimeSpan(1200.)
     picks = scdlpicker.dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
-    result = []
+
+    # We can have duplicate DL picks for any stream (nslc) but we
+    # only want one pick per nslc.
+    picks_per_nslc = dict()
     for pickID in picks:
         pick = picks[pickID]
+        nslc = scdlpicker.util.nslc(pick)
+        if nslc not in picks_per_nslc:
+            picks_per_nslc[nslc] = []
+        picks_per_nslc[nslc].append(pick)
 
-        n,s,l,c = scdlpicker.util.nslc(pick)
+
+    result = []
+    for nslc in picks_per_nslc:
+        # the first pick per nslc # TODO: review
+        sorted_picks = sorted(
+            picks_per_nslc[nslc],
+            key=lambda p: p.creationInfo().creationTime())
+        pick = sorted_picks[0]
+        pickID = pick.publicID()
+
+        n,s,l,c = nslc
         try:
             sta = station[n,s]
         except KeyError as e:
