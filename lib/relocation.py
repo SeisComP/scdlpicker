@@ -113,8 +113,15 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             seiscomp.logging.error("Fixing minimum depth")
             loc.useFixedDepth(True)
             loc.setFixedDepth(minimumDepth)
-            relocated = loc.relocate(origin)
-            relocated = seiscomp.datamodel.Origin.Cast(relocated)
+            try:
+                relocated = loc.relocate(origin)
+                relocated = seiscomp.datamodel.Origin.Cast(relocated)
+            except RuntimeError:
+                timestamp = scdlpicker.util.isotimestamp(now)
+                scdlpicker.util.dumpOriginXML(
+                    origin, "%s-%s-failed-relocation.xml" % (eventID, timestamp))
+                relocated = None
+                break
             loc.useFixedDepth(False)
 
         if not trimLargestResidual(relocated, maxResidual):
