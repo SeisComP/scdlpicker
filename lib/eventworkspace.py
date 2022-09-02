@@ -35,6 +35,13 @@ class EventWorkspace:
         self.mlpicks = dict()
         self.waveforms = dict()
 
+        # Here we store the picks that we *try* to repick incl.
+        # predictions. Not all of these will result in successful
+        # repicks, of course, but we must avoid retrying failed
+        # attempts again and again.
+        # TODO: cleanup from time to time!
+        self.attempted_picks = dict()
+
         # map pickID -> time
         # to track picks that we should have
         # but have not received

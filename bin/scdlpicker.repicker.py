@@ -164,6 +164,7 @@ class Repicker(ABC):
         for pick in picks:
             pick: AdHocPick
             pickID = pick.publicID
+            logger.debug("//// " + pickID)
 
             nslc = (pick.networkCode, pick.stationCode,
                     pick.locationCode, pick.channelCode[0:2])
@@ -194,6 +195,7 @@ class Repicker(ABC):
             if not fileZ and not fileN and not fileE:
                 # no data at all -> no debug message needed
                 logger.debug("---- " + pickID)
+                logger.debug("---- no data -> skipped")
                 continue
             if not fileZ or not fileN or not fileE:
                 # partly missing data
@@ -216,16 +218,19 @@ class Repicker(ABC):
             except (TypeError, ValueError,
                 obspy.io.mseed.InternalMSEEDError,
                 obspy.io.mseed.ObsPyMSEEDFilesizeTooSmallError) as e:
-                logger.warning("Caught " + repr(e) + " while processing pick " + pickID)
+                logger.warning(
+                    "Caught " + repr(e) + " while processing pick " + pickID)
                 continue
             except Exception as e:
                 logger.warning("Unknown exception: " + str(e))
 
             if None in (streamZ, streamE, streamE):
-                logger.warning(f" {nslc}: Didn't find mseed files for all components.")
+                logger.warning(
+                    f" {nslc}: Didn't find mseed files for all components.")
                 continue
             else:
-                [_.merge(method=1, fill_value=0, interpolation_samples=0) for _ in [streamZ, streamE, streamN]]
+                [ _.merge(method=1, fill_value=0, interpolation_samples=0)
+                    for _ in [streamZ, streamE, streamN]]
             if not stream:
                 stream = obspy.core.stream.Stream()
 
@@ -234,7 +239,9 @@ class Repicker(ABC):
                 trace_len = t[0].stats.endtime - t[0].stats.starttime
                 if trace_len < self.expected_input_length_sec:
                     logger.warning(
-                        f"Trace {nslc} ({t[0].meta.channel}): length {trace_len:.2f}s is too short. Picker needs {self.expected_input_length_sec:.2f}s. ")
+                        f"Trace {nslc} ({t[0].meta.channel}): "
+                        "length {trace_len:.2f}s is too short. "
+                        "Picker needs {self.expected_input_length_sec:.2f}s.")
                     break
             else:
                 stream += streamZ
@@ -247,8 +254,11 @@ class Repicker(ABC):
         return eventID, stream, collected_ahoc_picks
 
     def _process(self, adhoc_picks, eventID):
-        """Looks for new picks among the passed adhoc_picks, passes them to _ml_predict(), adds the new predictions to
-        the event workspace and returns all recently calculated ML picks."""
+        """
+        Looks for new picks among the passed adhoc_picks, passes them
+        to _ml_predict(), adds the new predictions to the event
+        workspace and returns all recently calculated ML picks.
+        """
 
         logger.debug("process %s    %d picks" % (eventID, len(adhoc_picks)))
 
@@ -417,9 +427,9 @@ class Repicker(ABC):
                     adhoc_picks.append(pick)
 
             try:
-                logger.warning("PROCESS")
+                logger.info("PROCESS begin")
                 new_picks = self._process(adhoc_picks, eventID)
-                logger.warning("PROCESS ended")
+                logger.info("PROCESS end")
             except RuntimeError as e:
                 logger.warning(str(e))
                 return
@@ -516,7 +526,9 @@ class Repicker(ABC):
                 annotations = self.model.annotate(stream)
 
                 # Only use those predictions that were done for P wave onsets
-                annotations = list(filter(lambda a: a.id.split('.')[-1].endswith('_P'), annotations))
+                annotations = list(filter(
+                    lambda a: a.id.split('.')[-1].endswith('_P'),
+                    annotations))
 
                 # indexes list of successfully associated annotations
                 assoc_ind = []
@@ -531,7 +543,11 @@ class Repicker(ABC):
                             p.locationCode == annotation.meta.location,
                             collected_adhoc_picks))
                     except StopIteration:
-                        logger.warning("failed to associate annotation for %s.%s" % (annotation.meta.network, annotation.meta.station))
+                        logger.warning(
+                            "failed to associate annotation for %s.%s" % (
+                                annotation.meta.network,
+                                annotation.meta.station))
+
                         # No AdHocPick could be found that matches the
                         # current annotation. The reason for this could be
                         # a gap in waveform data such that two traces of
@@ -582,16 +598,21 @@ class Repicker(ABC):
                 left_annos_n = len(annotations)
                 left_adhocs_n = len(collected_adhoc_picks)
                 if left_annos_n > 0:
-                    logger.warning(f"There were {left_annos_n} annotations that could not be associated.")
+                    logger.warning(
+                        f"There were {left_annos_n} annotations that "
+                        "could not be associated.")
                 if left_adhocs_n > 0:
-                    logger.warning(f"There were {left_adhocs_n} AdHoc picks for which no annotation was done.")
+                    logger.warning(
+                        f"There were {left_adhocs_n} AdHoc picks for "
+                        "which no annotation was done.")
 
         # end of fill_result()
 
 
         logger.info("ML predictions starts...")
 
-        annotations_dir = os.path.join(self.eventRootDir, eventID, self.annotDir)
+        annotations_dir = os.path.join(
+            self.eventRootDir, eventID, self.annotDir)
         os.makedirs(annotations_dir, exist_ok=True)
 
         acc_predictions = {}
@@ -602,28 +623,42 @@ class Repicker(ABC):
         while picks_remain_size > 0:
 
             picks_batch = adhoc_picks[start_index:end_index]
-            _eventID, stream, collected_adhoc_picks = self._get_stream_from_picks(picks_batch, eventID)
+            
+            try:
+                _eventID, stream, collected_adhoc_picks = \
+                    self._get_stream_from_picks(picks_batch, eventID)
+            except Exception:
+                stream = None
+
             if stream is not None:
                 # In some cases no picks are returned, nonetheless this
                 # could be true for the current batch of picks only, the
                 # next batch could be ok, therefore we just need to pass
                 # the following line
-                fill_result(acc_predictions, stream, collected_adhoc_picks, annotations_dir)
+                fill_result(
+                    acc_predictions, stream, collected_adhoc_picks,
+                    annotations_dir)
 
             # Updating
             picks_remain_size -= self.batchSize
             start_index += self.batchSize
-            end_index = min(start_index + self.batchSize, start_index + picks_remain_size)
+            end_index = min(
+                start_index + self.batchSize,
+                start_index + picks_remain_size)
 
         logger.info("...ML prediction ended.")
         return acc_predictions
 
 
 ##########################################################################
-# Attention: "TEPRepicker" and "TEPSWRepicker" are not available by standard seisbench servers yet,
-#   you need to provide the corresponding files manually in ~/.seisbench/models/tepsw (old TEP)
-#   resp. ~/.seisbench/models/tep (new TEP).
-#   Note that the file names without suffix must match the string (dataset) passed to from_pretrained() below.
+# Attention: "TEPRepicker" and "TEPSWRepicker" are not available by standard
+# seisbench servers yet, you need to provide the corresponding files manually
+# in    ~/.seisbench/models/tepsw (old TEP)
+# resp. ~/.seisbench/models/tep   (new TEP).
+#
+# Note that the file names without suffix must match the string (dataset)
+# passed to from_pretrained() below.
+##########################################################################
 
 
 class TEPRepicker(Repicker, ABC):
@@ -711,35 +746,47 @@ def main(model, bs, t, e, dev, wkdir, evdir, spdir, andir, ds, conf):
 if __name__ == '__main__':
     models = list(MODEL_MAP.keys())
     parser = argparse.ArgumentParser(description='SeicComp Client - ML Repicker using SeisBench')
-    parser.add_argument('--model', choices=models, default=models[0], dest='model',
-                        help=f"Choose one of the available ML models to make the predictions."
-                             f" Note that if the model is not cached, it might take a " \
-                             f"little while to download the weights file."
-                             f" Also note that for tep and tepsw you will need to download and install the necessary "
-                             f"files manually.")
-    parser.add_argument('--test', action='store_true',
-                        help='Prevents the repicker from writing out outgoing yaml with refined picks.')
-    parser.add_argument('--exit', action='store_true',
-                        help='Exit after items in spool folder have been processed')
-    parser.add_argument('--bs', '--batch-size', action='store_const', const=50, default=50, dest='batchSize',
-                        help="Choose a batch size that is suitable for the machine you are working on. Defaults to 50.")
-    parser.add_argument('--device', choices=['cpu', 'gpu'], default='cpu',
-                        help="If you have access to cuda device change this parameter to 'gpu'.")
-    parser.add_argument('--working-dir', type=str, default='.', dest='workingDir',
-                        help="Working directory where all files are placed and exchanged")
-    parser.add_argument('--event-dir', type=str, default='', dest='eventRootDir',
-                        help="Where to look for event folders with waveforms and picks and where to store annotations "
-                             "per each event")
-    parser.add_argument('--spool-dir', type=str, default='', dest='spoolDir',
-                        help="Where to look for new symlinks to YAML files that can be processed by the repicker.")
-    parser.add_argument('--annot-dir', type=str, default="annot", dest='annotDir',
-                        help="Where to write the annotations to, inside events/<event>/.")
-    parser.add_argument('--outgoing-dir', type=str, default='', dest='outgoingDir',
-                        help="outgoing directory where all result files are written")
-    parser.add_argument('--dataset', type=str, default='geofon', dest='dataset',
-                        help="The dataset on which the model was predicted. Defaults to geofon.")
-    parser.add_argument('--min-confidence', type=float, default=0.3, dest='minConfidence',
-                        help="Confidence threshold below which a pick is skipped. Defaults to 0.3")
+    parser.add_argument(
+        '--model', choices=models, default=models[0], dest='model',
+        help=f"Choose one of the available ML models to make the predictions."
+             f" Note that if the model is not cached, it might take a " \
+             f"little while to download the weights file."
+             f" Also note that for tep and tepsw you will need to download and install the necessary "
+             f"files manually.")
+    parser.add_argument(
+        '--test', action='store_true',
+        help='Prevents the repicker from writing out outgoing yaml with refined picks.')
+    parser.add_argument(
+        '--exit', action='store_true',
+        help='Exit after items in spool folder have been processed')
+    parser.add_argument(
+        '--bs', '--batch-size', action='store_const', const=50, default=50, dest='batchSize',
+        help="Choose a batch size that is suitable for the machine you are working on. Defaults to 50.")
+    parser.add_argument(
+        '--device', choices=['cpu', 'gpu'], default='cpu',
+        help="If you have access to cuda device change this parameter to 'gpu'.")
+    parser.add_argument(
+        '--working-dir', type=str, default='.', dest='workingDir',
+        help="Working directory where all files are placed and exchanged")
+    parser.add_argument(
+        '--event-dir', type=str, default='', dest='eventRootDir',
+        help="Where to look for event folders with waveforms and picks and where to store annotations "
+            "per each event")
+    parser.add_argument(
+        '--spool-dir', type=str, default='', dest='spoolDir',
+        help="Where to look for new symlinks to YAML files that can be processed by the repicker.")
+    parser.add_argument(
+        '--annot-dir', type=str, default="annot", dest='annotDir',
+        help="Where to write the annotations to, inside events/<event>/.")
+    parser.add_argument(
+        '--outgoing-dir', type=str, default='', dest='outgoingDir',
+        help="outgoing directory where all result files are written")
+    parser.add_argument(
+        '--dataset', type=str, default='geofon', dest='dataset',
+        help="The dataset on which the model was predicted. Defaults to geofon.")
+    parser.add_argument(
+        '--min-confidence', type=float, default=0.3, dest='minConfidence',
+        help="Confidence threshold below which a pick is skipped. Defaults to 0.3")
     args = parser.parse_args()
 
     if not args.eventRootDir:

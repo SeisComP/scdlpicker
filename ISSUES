@@ -1,0 +1,15 @@
+If the initial source depth is very wrong, e.g. 500 km vs. 10 km,
+then two problems arise:
+
+- The picking based on the "predicted" pick arrival may
+  work but the resulting pick is too far off the prediction and the
+  pick will be skipped due to the too-large time difference.
+
+- The predicted pick time of an early origin with wrong depth is not
+  updated with consolidating source depth. Even a very good pick
+  will therefore be rejected and there is no way out.
+
+Test-Event e.g. gfz2022fpfe.
+
+Solution: The client needs to update the predicted arrival time for
+each and every origin.

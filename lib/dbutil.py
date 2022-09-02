@@ -175,6 +175,9 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
             arr.setTimeUsed(delta <= maxDelta)
             arr.setWeight(1.)
             origin.add(arr)
+            print(pickID, "+++", dt)
+        else:
+            print(pickID, "---", dt)
 
     for arr in scdlpicker.util.ArrivalIterator(origin):
         pickID = arr.pickID()

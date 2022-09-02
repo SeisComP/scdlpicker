@@ -212,6 +212,7 @@ def summarize(obj, withPicks=False):
     else:
         print("  Depth      %4.4g km fixed" % val)
 
+    print("  Arr count %d" % obj.arrivalCount())
     countAll = 0
     countUsed = 0
     for arr in ArrivalIterator(obj):

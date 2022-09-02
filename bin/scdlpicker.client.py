@@ -29,11 +29,6 @@ import scdlpicker.inventory
 import scdlpicker.util
 import scdlpicker.eventworkspace
 
-from seiscomp.datamodel import \
-    EventParameters, Event, Origin, Pick, \
-    Notifier, \
-    Magnitude, PublicObject, CreationInfo
-
 
 #### Below is configuration that for the time being is hardcoded.
 
@@ -94,8 +89,21 @@ def computeTravelTimes(delta, depth):
     return arrivals
 
 
-
 def alreadyRepicked(pick):
+    """
+    This is not a repick but a repick for this exits already
+
+    TODO: check if a repick of this pick exists or has been
+    attempted
+    """
+    pass # TODO
+
+
+def isRepick(pick):
+    """
+    Is this already a repick?
+    """
+
     if pick.publicID().endswith("/repicked"):
         return True
 
@@ -133,6 +141,7 @@ def gappy(waveforms, tolerance=0.5):
             dt = float(rec.startTime() - prev.endTime())
             if abs(dt)/rec.samplingFrequency() > tolerance:
                 gapCount += 1
+        prev = rec
     return gapCount
 
 
@@ -261,9 +270,7 @@ class OriginStreamApp(seiscomp.client.Application):
             return False
 
         try:
-            print("TRYING optionString('working-dir')")
             self.workingDir = self.commandline().optionString("working-dir")
-            print("FOUND  optionString('working-dir')")
         except RuntimeError as e:
             pass
 
@@ -381,7 +388,12 @@ class OriginStreamApp(seiscomp.client.Application):
                 seiscomp.core.TimeSpan(firstArrival.time)
             timestamp = time.toString("%Y%m%d.%H%M%S.%f000000")[:18]
             pickID = timestamp + "-PRE-%s.%s.%s.%s" % (n, s, l, c)
+            if seiscomp.datamodel.Pick.Find(pickID):
+                # FIXME HACK FIXME
+                continue
+            seiscomp.logging.debug("before Pick "+pickID)
             predictedPick = seiscomp.datamodel.Pick(pickID)
+            seiscomp.logging.debug("after Pick "+pickID)
             phase = seiscomp.datamodel.Phase()
             phase.setCode("P")
             predictedPick.setPhaseHint(phase)
@@ -432,7 +444,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
     def _loadEvent(self, publicID):
         # load a bare Event object from database
-        tp = Event
+        tp = seiscomp.datamodel.Event
         obj = self.query().loadObject(tp.TypeInfo(), publicID)
         obj = tp.Cast(obj)
         if obj is None:
@@ -442,7 +454,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
     def _loadOrigin(self, publicID):
         # load an Origin object from database
-        tp = Origin
+        tp = seiscomp.datamodel.Origin
         obj = self.query().loadObject(tp.TypeInfo(), publicID)
         obj = tp.Cast(obj)
         if obj is None:
@@ -497,7 +509,7 @@ class OriginStreamApp(seiscomp.client.Application):
             return waveforms  # empty
 
         # request waveforms and dump them to one file per stream
-        seiscomp.logging.info("RecordStream start")
+        seiscomp.logging.info("Opening RecordStrem "+self.recordStreamURL())
         stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
         stream.setTimeout(streamTimeout)
         streamCount = 0
@@ -517,16 +529,16 @@ class OriginStreamApp(seiscomp.client.Application):
         for rec in scdlpicker.util.RecordIterator(stream):
             if not rec.streamID() in waveforms:
                 waveforms[rec.streamID()] = []
-
-            # append binary (raw) MiniSEED record to data string
             waveforms[rec.streamID()].append(rec)
         count = 0
         for key in waveforms:
             count += len(waveforms[key])
-        seiscomp.logging.debug("RecordStream: received  %d records for %d streams"
+        seiscomp.logging.debug(
+            "RecordStream: received  %d records for %d streams"
             % (count, len(waveforms.keys())))
 
         # remove gappy streams
+        seiscomp.logging.debug("Looking for gappy streams")
         gappyStreams = []
         for streamID in waveforms:
             if gappy(waveforms[streamID], tolerance=1.):
@@ -535,29 +547,13 @@ class OriginStreamApp(seiscomp.client.Application):
             seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
             del waveforms[streamID]
 
-        # determine streams for which we don't have 3 components
-        streamIDs = dict()
-        for streamID in waveforms:
-            firstRecord = waveforms[streamID][0]
-            n,s,l,c = scdlpicker.util.nslc(firstRecord)
-            if (n,s,l) not in streamIDs:
-                streamIDs[(n,s,l)] = []
-            streamIDs[(n,s,l)].append(streamID)
-
-        # for each complete NSL stream there should be 3 streamID's
-        for nsl in streamIDs:
-            if len(streamIDs[nsl]) < 3:
-                for streamID in streamIDs[nsl]:
-                    del waveforms[streamID]
-                    seiscomp.logging.warning("Incomplete stream "+streamID+" ignored")
-
         self.acquisitionInProgress = False
         return waveforms
 
 
 
     def testEvent(self, eventID,
-            skipManualOrigins=True,
+            skipManualOrigins=False,
             preferredOriginOnly=False):
         """
         Test the module for the event with the specified ID.
@@ -592,7 +588,7 @@ class OriginStreamApp(seiscomp.client.Application):
             for origin in self.query().getOrigins(eventID):
                 try:
                     # hack to acquire ownership
-                    origin = Origin.Cast(origin)
+                    origin = seiscomp.datamodel.Origin.Cast(origin)
                     assert origin is not None
                     origin.creationInfo().creationTime()
                 except ValueError:
@@ -637,7 +633,6 @@ class OriginStreamApp(seiscomp.client.Application):
                 # e.g. Ctrl-C
                 return True
 
-            workspace.origin = origin
             self.processOrigin(origin, event)
             workspace.dump()
 
@@ -646,14 +641,14 @@ class OriginStreamApp(seiscomp.client.Application):
 
     def addObject(self, parentID, obj):
         # called by the Application class if a new object is received
-        event = Event.Cast(obj)
+        event = seiscomp.datamodel.Event.Cast(obj)
         if scdlpicker.util.valid(event):
             self.pendingEvents[event.publicID()] = event
 
 
     def updateObject(self, parentID, obj):
         # called by the Application class if an updated object is received
-        event = Event.Cast(obj)
+        event = seiscomp.datamodel.Event.Cast(obj)
         if scdlpicker.util.valid(event):
             self.pendingEvents[event.publicID()] = event
 
@@ -694,6 +689,7 @@ class OriginStreamApp(seiscomp.client.Application):
         now = seiscomp.core.Time.GMT()
 
         workspace = self.workspaces[event.publicID()]
+        workspace.origin = origin
 
         # Find out which picks are new picks.
         #
@@ -703,9 +699,16 @@ class OriginStreamApp(seiscomp.client.Application):
         # missing data are now re-processed.
         workspace.new_picks.clear()
 
+        # Query all associated picks for this origin
         associated_picks = []
-        for obj in self.query().getPicks(originID):
-            pick = Pick.Cast(obj)
+        seiscomp.logging.debug("before getPicks")
+        objects = self.query().getPicks(originID)
+        seiscomp.logging.debug("after getPicks")
+        if not objects:
+            # FIXME: temp
+            seiscomp.logging.debug("no results from getPicks")
+        for obj in objects:
+            pick = seiscomp.datamodel.Pick.Cast(obj)
 
             # prevent a pick from myself from being repicked
             try:
@@ -719,21 +722,46 @@ class OriginStreamApp(seiscomp.client.Application):
         for pick in associated_picks:
 
             pickID = pick.publicID()
-            # if pickID in workspace.mlpicks:
-            #     seiscomp.logging.debug("I already have a DL pick for "+pickID)
             if pickID not in workspace.all_picks:
                 workspace.all_picks[pickID] = pick
+                seiscomp.logging.debug("Added to workspace pick "+pickID)
 
             # We usually don't re-pick manual picks.
             # Perhaps add option to allow that.
-            if scdlpicker.util.manual(pick):
-                continue
-            
-            if alreadyRepicked(pick): 
+#           if scdlpicker.util.manual(pick):
+#               seiscomp.logging.debug("Skipping manual pick "+pickID)
+#               continue
+           
+            # FIXME: The problem with this check at this point is that
+            # workspace.mlpicks[pickID] will exist only if by the time
+            # we perform this check, a repicker result for pickID is
+            # already available, which may take minutes. If this is
+            # not the case, redundant repickings cannot be avoided.
+            if pickID in workspace.mlpicks:
+                seiscomp.logging.debug("Skipping already repicked "+pickID)
+
+            if pickID in workspace.attempted_picks:
+                seiscomp.logging.debug("Skipping previously attempted repick "+pickID)
                 continue
 
-            seiscomp.logging.debug("adding new pick "+pickID)
+            if isRepick(pick): 
+                seiscomp.logging.debug("Skipping repick "+pickID)
+                continue
+
+            found = False
+            for _pickID in workspace.attempted_picks:
+                _pick = workspace.attempted_picks[_pickID]
+                if _pick.waveformID() == pick.waveformID():
+                    found = True
+                    break
+            if found:
+                seiscomp.logging.debug("Skipping previously attempted waveform ID of pick "+pickID)
+                continue
+
+
+            seiscomp.logging.debug("Adding new pick "+pickID)
             workspace.new_picks[pickID] = pick
+            workspace.attempted_picks[pickID] = pick
 
         try:
             magnitudeID = event.preferredMagnitudeID()
@@ -795,7 +823,11 @@ class OriginStreamApp(seiscomp.client.Application):
                     pick = predictedPicks[pickID]
                     if pickID not in workspace.all_picks:
                         workspace.all_picks[pickID] = pick
+                        if pickID in workspace.attempted_picks:
+                            seiscomp.logging.debug("Skipping previously attempted repick "+pickID)
+                            continue
                         workspace.new_picks[pickID] = pick
+                        workspace.attempted_picks[pickID] = pick
 
                 waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
                 for streamID in waveforms:
@@ -805,6 +837,23 @@ class OriginStreamApp(seiscomp.client.Application):
         # read them as miniSEED files into ObsPy. This
         # is the SeisComP-to-ObsPy iterface so to say.
         workspace.dump(eventRootDir=self.eventRootDir, spoolDir=self.spoolDir)
+
+        # determine streams for which we don't have 3 components
+        streamIDs = dict()
+        for streamID in workspace.waveforms:
+            firstRecord = workspace.waveforms[streamID][0]
+            n,s,l,c = scdlpicker.util.nslc(firstRecord)
+            if (n,s,l) not in streamIDs:
+                streamIDs[(n,s,l)] = []
+            streamIDs[(n,s,l)].append(streamID)
+
+        # for each complete NSL stream there should be 3 streamID's
+        for nsl in streamIDs:
+            if len(streamIDs[nsl]) < 3:
+                for streamID in streamIDs[nsl]:
+                    del workspace.waveforms[streamID]
+                    seiscomp.logging.warning(
+                        "Incomplete stream "+streamID+" ignored")
 
 
     def processEvent(self, event):
@@ -829,13 +878,12 @@ class OriginStreamApp(seiscomp.client.Application):
                     "Event "+eventID+": no change of preferred origin")
                 return
         origin = self._loadOrigin(originID)
-        workspace.origin = origin
         self.processOrigin(origin, event)
         self.cleanup()
 
 
     def _creationInfo(self):
-        ci = CreationInfo()
+        ci = seiscomp.datamodel.CreationInfo()
         ci.setAuthor(author)
         ci.setAgencyID(agency)
         ci.setCreationTime(seiscomp.core.Time.GMT())
@@ -860,7 +908,10 @@ class OriginStreamApp(seiscomp.client.Application):
 
             for p in yaml.safe_load(yf):
                 pickID = p["publicID"]
-                pick = Pick(pickID)
+                if seiscomp.datamodel.Pick.Find(pickID):
+                    # FIXME HACK FIXME
+                    seiscomp.logging.debug("FIXME: "+pickID)
+                pick = seiscomp.datamodel.Pick(pickID)
                 time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
                 tq = seiscomp.datamodel.TimeQuantity()
                 tq.setValue(time)
@@ -920,13 +971,13 @@ class OriginStreamApp(seiscomp.client.Application):
             seiscomp.logging.info("pollRepickerResults: working on "+path)
             picks = self.readResults(path)
 
-            ep = EventParameters()
-            Notifier.Enable()
+            ep = seiscomp.datamodel.EventParameters()
+            seiscomp.datamodel.Notifier.Enable()
             for pickID in picks:
                 pick = picks[pickID]
                 ep.add(pick)
-            msg = Notifier.GetMessage()
-            Notifier.Disable()
+            msg = seiscomp.datamodel.Notifier.GetMessage()
+            seiscomp.datamodel.Notifier.Disable()
             if self.connection().send(msg):
                 for pickID in picks:
                     seiscomp.logging.info("sent "+pickID)
@@ -949,12 +1000,13 @@ class OriginStreamApp(seiscomp.client.Application):
             eventID = None
 
         if eventID:
+            seiscomp.datamodel.PublicObject.SetRegistrationEnabled(False)
             seiscomp.logging.info("In single-event mode. Event is "+eventID)
             return self.testEvent(eventID)
 
         # enter real-time mode
         self.enableTimer(1)
-        PublicObject.SetRegistrationEnabled(False)
+        seiscomp.datamodel.PublicObject.SetRegistrationEnabled(False)
 
         return super(OriginStreamApp, self).run()
 

@@ -242,6 +242,7 @@ class RelocatorApp(seiscomp.client.Application):
         origin = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
         seiscomp.logging.debug("Loaded origin "+origin.publicID())
 
+
         # adopt fixed depth according to incoming origin
         defaultDepth = 10. # FIXME: no fixed 10 km here
         if scdlpicker.util.hasFixedDepth(origin) and origin.depth().value()==defaultDepth:
@@ -257,6 +258,7 @@ class RelocatorApp(seiscomp.client.Application):
         originWithArrivals, picks = scdlpicker.dbutil.loadPicksForOrigin(
                         origin, self.inventory, self.allowedAuthorIDs,
                         self.query())
+        seiscomp.logging.debug("arrivalCount=%d" % originWithArrivals.arrivalCount())
 
         relocated = scdlpicker.relocation.relocate(
                         originWithArrivals, eventID, fixedDepth,
