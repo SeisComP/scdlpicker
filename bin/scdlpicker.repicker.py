@@ -22,10 +22,10 @@ import yaml
 import time
 import logging
 import numpy as np
+import scipy.signal
 from typing import Tuple
 import argparse
 import obspy
-from locmax import local_maxima
 from abc import ABC, abstractmethod
 
 # Here is the place to import other DL models
@@ -361,6 +361,11 @@ class Repicker(ABC):
             - process the event parameters
             - if successful and not in test mode, remove symlink
         """
+        try:
+            os.makedirs(self.spoolDir)
+        except FileExistsError:
+            pass
+
         items = [i for i in os.listdir(self.spoolDir)
                  if i.endswith(".yaml")]
 
@@ -444,6 +449,7 @@ class Repicker(ABC):
                 p["channelCode"] = new_pick.channelCode
                 p["time"] = new_pick.time
                 p["confidence"] = float("%.3f" % new_pick.confidence)
+                p["model"] = self.model_name
                 outgoing_yaml.append(p)
 
             if self.test:
@@ -570,20 +576,17 @@ class Repicker(ABC):
                     annot_f = os.path.join(annot_d, "%s.%s.%s.%s.sac" % nslc)
                     annotation.write(annot_f, format="SAC")
 
-                    data = annotation.data.astype(np.double)
+                    confidence = annotation.data.astype(np.double)
                     times = annotation.times()
-                    for local_maximum in local_maxima(data, 0.1):
-                        maxValue, firstIndex, maxIndex, lastIndex = \
-                            local_maximum
-
-                        picktime = annotation.stats.starttime + times[maxIndex]
-                        confidence = maxValue
+                    peaks, _ = scipy.signal.find_peaks(confidence, height=0.1)
+                    for peak in peaks:
+                        picktime = annotation.stats.starttime + times[peak]
                         if pick.publicID not in predictions:
                             predictions[pick.publicID] = []
-                        new_item = (picktime, confidence)
+                        new_item = (picktime, confidence[peak])
                         predictions[pick.publicID].append(new_item)
                         logger.debug("#### " + pick.publicID +
-                                     "  %.3f" % confidence)
+                                     "  %.3f" % confidence[peak])
 
                     collected_adhoc_picks.remove(pick)
 
