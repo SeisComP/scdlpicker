@@ -26,17 +26,14 @@ import scipy.signal
 from typing import Tuple
 import argparse
 import obspy
-from abc import ABC, abstractmethod
 
 # Here is the place to import other DL models
 from seisbench.models import EQTransformer, PhaseNet
 
-# TEPSW stands for TEP with Sliding Window is an older version of TEP
-# The most recent version is simply called TEP
-try:
-    from tep.tep import TEPSW, TEP
-except ImportError:
-    TEPSW = TEP = None
+MODEL_MAP = {
+    'phasenet': PhaseNet,
+    'eqtransformer': EQTransformer,
+}
 
 LOGFORMAT = "%(levelname)-8s  %(asctime)s %(message)s"
 logging.basicConfig(format=LOGFORMAT)
@@ -45,9 +42,6 @@ logger.setLevel(logging.DEBUG)
 
 
 class EventWorkspaceContainer:
-    # TODO AFAICS this is a short version of the one in eventworkspace.py,
-    #      would recommend to make it even shorter.
-    # TODO And to make the project more consistent, I renamed the class
 
     def __init__(self):
         self.picks = dict()
@@ -55,34 +49,18 @@ class EventWorkspaceContainer:
         self.waveforms = dict()
 
 
-class AdHocPick:
-    """
-    An AdHocPick object is a pick with a publicID that the
-    DL model refines by repicking.
-    """
-
-    def __init__(self, public_id):
-        self.channelCode = None
-        self.locationCode = None
-        self.stationCode = None
-        self.networkCode = None
-        self.publicID = public_id
-
-    def __str__(self):
-        """ Implemented for debugging purposes. """
-        return self.publicID
-
-    def clone(self):
-        clone = AdHocPick(self.publicID)
-        clone.networkCode = self.networkCode
-        clone.stationCode = self.stationCode
-        clone.locationCode = self.locationCode
-        clone.channelCode = self.channelCode
-        clone.time = self.time
-        return clone
+Pick = obspy.core.AttribDict
 
 
-class Repicker(ABC):
+def dotted_nslc(pick):
+    return "%s.%s.%s.%s" % (
+        pick.networkCode,
+        pick.stationCode,
+        pick.locationCode,
+        pick.channelCode )
+
+
+class Repicker:
     """A class to hold settings and provide methods for arbitrary seisbench
     compatible P wave pickers.
 
@@ -94,7 +72,7 @@ class Repicker(ABC):
 
     The Repicker is run in an infinity loop polling for new symbolic links
     inside the sub-directory `spool/`. Those links should point to YAML files
-    containing picks which are usually residing in an `events/<EVENT>/` 
+    containing picks which are usually residing in an `events/<EVENT>/`
     sub-folder.
 
     The refined picks are written into YAML files inside `outgoing/`.
@@ -114,9 +92,16 @@ class Repicker(ABC):
         device(str): Defines where to run the model - "cpu" or "gpu"
     """
 
-    def __init__(self, workingDir=".", eventRootDir="events", spoolDir="spool",
+    def __init__(self, model_name=None, dataset="geofon",
+                 workingDir=".", eventRootDir="events", spoolDir="spool",
                  test=False, exit=False, batchSize=False, device="cpu",
                  minConfidence=None, annotDir="annot"):
+
+        if not model_name in MODEL_MAP:
+            raise ValueError("No such model: "+model_name)
+
+        self.model = MODEL_MAP[model_name].from_pretrained(dataset)
+        self.model_name = model_name
 
         self.test = test
         self.exit = exit
@@ -133,36 +118,25 @@ class Repicker(ABC):
         elif device == "gpu":
             self.model.cuda()
 
-        self.expected_input_length_sec = self.model.in_samples / self.model.sampling_rate
+        self.expected_input_length_sec = \
+            self.model.in_samples / self.model.sampling_rate
 
-    @property
-    @abstractmethod
-    def model(self):
-        pass
-
-    @model.setter
-    def model(self, model):
-        self.model_ = model
-
-    @model.getter
-    def model(self):
-        return self.model_
-
-    def _get_stream_from_picks(
-            self,
-            picks,
-            eventID) -> Tuple[str, obspy.core.stream.Stream, list]:
-        """ Fills
-
+    def _get_stream_from_picks(self, picks, eventID) \
+            -> Tuple[str, obspy.core.stream.Stream, list]:
         """
-        logger.info("################ get_stream_from_picks %d new picks" % len(picks))
+        For the given picks, read the corresponding streams and return them.
+
+        No streams are returned if at least one component is missing. Since
+        not always for all picks all streams will be complete, a list of picks
+        for which we have all data is returned.
+        """
 
         # Collect streams from mseed files
-        collected_ahoc_picks = []
+        collected_picks = []
         stream = None
         eventRootDir = self.eventRootDir
         for pick in picks:
-            pick: AdHocPick
+            pick: Pick
             pickID = pick.publicID
             logger.debug("//// " + pickID)
 
@@ -174,10 +148,12 @@ class Repicker(ABC):
 
             waveforms_d = os.path.join(eventRootDir, eventID, "waveforms")
 
+            # Look for the Z component
             fileZ = os.path.join(waveforms_d, nslc + "Z" + ".mseed")
             if not os.path.exists(fileZ):
                 fileZ = None
 
+            # Look for the N or 1 component
             for component in ["N", "1"]:
                 fileN = os.path.join(waveforms_d, nslc + component + '.mseed')
                 if os.path.exists(fileN):
@@ -185,6 +161,7 @@ class Repicker(ABC):
             else:
                 fileN = None
 
+            # Look for the E or 2 component
             for component in ["E", "2"]:
                 fileE = os.path.join(waveforms_d, nslc + component + '.mseed')
                 if os.path.exists(fileE):
@@ -192,10 +169,11 @@ class Repicker(ABC):
             else:
                 fileE = None
 
+            # Check for missing files
             if not fileZ and not fileN and not fileE:
                 # no data at all -> no debug message needed
                 logger.debug("---- " + pickID)
-                logger.debug("---- no data -> skipped")
+                logger.debug("---- not enough data -> skipped")
                 continue
             if not fileZ or not fileN or not fileE:
                 # partly missing data
@@ -203,6 +181,7 @@ class Repicker(ABC):
                 logger.debug("---- missing components -> skipped")
                 continue
 
+            # All needed files exist
             logger.debug("++++ " + pickID)
 
             streamZ, streamE, streamN = None, None, None
@@ -216,8 +195,8 @@ class Repicker(ABC):
             # The following are all real-life exceptions observed in the past
             # and which we tolerate for the time being.
             except (TypeError, ValueError,
-                obspy.io.mseed.InternalMSEEDError,
-                obspy.io.mseed.ObsPyMSEEDFilesizeTooSmallError) as e:
+                    obspy.io.mseed.InternalMSEEDError,
+                    obspy.io.mseed.ObsPyMSEEDFilesizeTooSmallError) as e:
                 logger.warning(
                     "Caught " + repr(e) + " while processing pick " + pickID)
                 continue
@@ -247,11 +226,11 @@ class Repicker(ABC):
                 stream += streamZ
                 stream += streamN
                 stream += streamE
-                collected_ahoc_picks.append(pick)
-        if len(collected_ahoc_picks) == 0:
+                collected_picks.append(pick)
+        if len(collected_picks) == 0:
             logger.debug(f"Empty stream for event {eventID}.")
-        logger.debug("################ get_stream_from_picks end")
-        return eventID, stream, collected_ahoc_picks
+
+        return eventID, stream, collected_picks
 
     def _process(self, adhoc_picks, eventID):
         """
@@ -270,8 +249,8 @@ class Repicker(ABC):
         new_adhoc_picks = []
         for pick in adhoc_picks:
             pick_id = pick.publicID
-            # We need to avoid to again and again try to process
-            # picks we have already worked on. So we only process
+            # We need to avoid to repeatedly try to process picks
+            # we have already finished processing. So we only process
             # picks that we haven't seen for this event. This is OK
             # because there is no cross-talk between picks. However,
             # in case we analyze picks in the context of other
@@ -297,7 +276,7 @@ class Repicker(ABC):
         predictions = self._ml_predict(new_adhoc_picks, eventID)
 
         if not predictions:
-            logger.warning("tep_predict returned without result")
+            logger.warning("processing returned without result")
             return []
 
         new_picks = list()
@@ -329,9 +308,10 @@ class Repicker(ABC):
                     logger.info("SKIPPED conf = %.3f" % ml_conf)
                     continue
                 old_pick = workspace.picks[pick_id]
-                new_pick = old_pick.clone()
+                new_pick = old_pick.copy()
                 new_pick.publicID = old_pick.publicID + "/repick"
-                new_pick.confidence = ml_conf
+                new_pick.model = self.model_name
+                new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = ml_timestamp
                 # FIXME: new_pick.time is an isotimestamp without uncertainties
 
@@ -344,15 +324,54 @@ class Repicker(ABC):
 
                 # FIXME: For the time being
                 assert new_pick not in new_picks
-
                 new_picks.append(new_pick)
 
         return new_picks
 
+    def _findSpoolItems(self):
+        d = self.spoolDir
+        filenames = [i for i in os.listdir(d) if i.endswith(".yaml")]
+        items = list()
+        for filename in sorted(filenames):
+            path = os.path.join(d, filename)
+
+            if os.path.islink(path):
+                target = os.readlink(path)
+                target = os.path.join(d, target)
+                if not os.path.exists(target):
+                    logger.warning("missing " + target)
+                    continue
+
+                items.append( (path, target) )
+        return items
+
+    def _readPicksFromYaml(self, yamlfilename):
+        with open(yamlfilename) as yamlfile:
+            streamIDs = []
+            picks = list()
+            for p in yaml.safe_load(yamlfile):
+                # Prevent duplicate stream IDs
+                streamID = p["streamID"]
+                duplicateStreamID = streamID in streamIDs
+                if duplicateStreamID:
+                    continue
+                streamIDs.append(streamID)
+                pick = Pick(p)
+                try:
+                    pick.phaseHint
+                except AttributeError:
+                    pick.phaseHint = "P"
+                picks.append(pick)
+            return picks
+
+    def _writePicksToYaml(self, picks, yamlfilename):
+        tmp = [ dict(pick) for pick in picks ]
+        with open(yamlfilename, 'w') as yamlfile:
+            yaml.dump(tmp, yamlfile)
 
     def _poll(self, reverse=True):
         """
-        Check whether there is data ready to be processed.
+        Check whether there is data waiting to be processed.
 
         * Is there a new symlink in the spool directory?
         * If yes:
@@ -366,25 +385,9 @@ class Repicker(ABC):
         except FileExistsError:
             pass
 
-        items = [i for i in os.listdir(self.spoolDir)
-                 if i.endswith(".yaml")]
+        spooled = self._findSpoolItems()
 
-        todolist = list()
-
-        for item in sorted(items):
-            path = os.path.join(self.spoolDir, item)
-
-            if os.path.islink(path):
-                target = os.readlink(path)
-                target = os.path.join(self.spoolDir, target)
-                if not os.path.exists(target):
-                    logger.warning("missing " + target)
-                    continue
-
-                todoitem = (path, target)
-                todolist.append(todoitem)
-
-        # By reversing the todolist, we prioritize the last-added
+        # By reversing the list, we prioritize the last-added
         # items. This is good if after a long outage we want to be
         # in real-time mode quickly. But on the other hand the most
         # recent items are also usually the biggest and take
@@ -392,10 +395,11 @@ class Repicker(ABC):
         # effects. Possibly slight delays in real-time mode as
         # bigger items are prioritized, which take longer to
         # process. Or we divide big items into smaller ones. TBD
-        for todoitem in sorted(todolist, reverse=reverse):
-            link, target = todoitem
+        for item in sorted(spooled, reverse=reverse):
+            link, target = item
 
             logger.debug("+++reading %s" % target)
+            adhoc_picks = self._readPicksFromYaml(target)
 
             # FIXME: hackish
             # The input yaml path name is composed of
@@ -403,33 +407,7 @@ class Repicker(ABC):
             # so the eventID is always at a fixed position in the
             # path. This is required.
             assert target.endswith(".yaml")
-#           assert target.split("/")[-4] == self.eventRootDir
             eventID = target.split("/")[-3]
-
-            eventDir = os.path.join(self.eventRootDir, eventID)
-
-            streamIDs = []
-            with open(target) as yf:
-                adhoc_picks = list()
-                for p in yaml.safe_load(yf):
-                    # Make sure that we process only
-                    # one pick per stream ID!
-                    streamID = p["streamID"]
-                    if streamID in streamIDs:
-                        continue
-                    streamIDs.append(streamID)
-
-                    pick = AdHocPick(p["publicID"])
-                    pick.networkCode = p["networkCode"]
-                    pick.stationCode = p["stationCode"]
-                    pick.locationCode = p["locationCode"]
-                    pick.channelCode = p["channelCode"]
-                    pick.time = p["time"]
-                    try:
-                        pick.phaseHint = p["phaseHint"]
-                    except KeyError:
-                        pick.phaseHint = "P"
-                    adhoc_picks.append(pick)
 
             try:
                 logger.info("PROCESS begin")
@@ -437,27 +415,18 @@ class Repicker(ABC):
                 logger.info("PROCESS end")
             except RuntimeError as e:
                 logger.warning(str(e))
-                return
+                continue
 
-            outgoing_yaml = list()
-            for new_pick in new_picks:
-                p = dict()
-                p["publicID"] = new_pick.publicID
-                p["networkCode"] = new_pick.networkCode
-                p["stationCode"] = new_pick.stationCode
-                p["locationCode"] = new_pick.locationCode
-                p["channelCode"] = new_pick.channelCode
-                p["time"] = new_pick.time
-                p["confidence"] = float("%.3f" % new_pick.confidence)
-                p["model"] = self.model_name
-                outgoing_yaml.append(p)
+            if not new_picks:
+                logging.warning("no results - exiting")
+                os.remove(link)
+                continue
 
             if self.test:
                 logger.info("+++test mode - stopping")
-                return True
+                continue
 
-            # produce the output
-
+            eventDir = os.path.join(self.eventRootDir, eventID)
             # directory to which we write the resulting yaml files
             out_d = os.path.join(eventDir, "out")
 
@@ -467,15 +436,9 @@ class Repicker(ABC):
 
             d, f = os.path.split(link)
 
-            if not outgoing_yaml:
-                logging.warning("no results - exiting")
-                os.remove(link)
-                return
-
             os.makedirs(out_d, exist_ok=True)
-            yamlFileName = os.path.join(out_d, f)
-            with open(yamlFileName, 'w') as file:
-                yaml.dump(outgoing_yaml, file)
+            yamlfilename = os.path.join(out_d, f)
+            self._writePicksToYaml(new_picks, yamlfilename)
 
             dst = os.path.join(outgoing_d, f)
             # TODO: clean up!
@@ -484,7 +447,7 @@ class Repicker(ABC):
             try:
                 logging.debug("creating symlink %s -> %s" % (dst, src))
                 os.symlink(src, dst)
-            except FileExistsError as e:
+            except FileExistsError:
                 logging.warning("symlink  %s -> %s" % (dst, src))
 
             # we are done with this item
@@ -510,9 +473,8 @@ class Repicker(ABC):
 
         return True
 
-
     def _ml_predict(self, adhoc_picks, eventID):
-        """ Takes a list of AdHocPick instances, repicks them,
+        """ Takes a list of Pick instances, repicks them,
         fills a dictionary with those predictions,
         each a (Time, confidence) pair, and returns it.
 
@@ -520,10 +482,10 @@ class Repicker(ABC):
             dict: a dictionary of `pickID: (time, confidence)` pairs
         """
 
-        def fill_result(predictions, stream, collected_adhoc_picks, annot_d):
+        def fill_result(predictions, stream, collected_picks, annot_d):
             """Fills `predictions` with annotations done by the model
-               using the stream. Additional data will be grabbed from
-               `collected_adhoc_picks`.
+               using the stream. Additional data will be taken from
+               `collected_picks`.
             """
             annotations, assoc_ind = None, None
             try:
@@ -533,33 +495,32 @@ class Repicker(ABC):
 
                 # Only use those predictions that were done for P wave onsets
                 annotations = list(filter(
-                    lambda a: a.id.split('.')[-1].endswith('_P'),
-                    annotations))
+                    lambda a: a.id.split('.')[-1].endswith('_P'), annotations))
 
                 # indexes list of successfully associated annotations
                 assoc_ind = []
                 for i, annotation in enumerate(annotations):
                     try:
-                        # Associate the annotation to an AdHocPick
+                        # Associate the annotation to a Pick
 
                         pick = next(filter(
                             lambda p:
                             p.networkCode == annotation.meta.network and
                             p.stationCode == annotation.meta.station and
                             p.locationCode == annotation.meta.location,
-                            collected_adhoc_picks))
+                            collected_picks))
                     except StopIteration:
                         logger.warning(
                             "failed to associate annotation for %s.%s" % (
                                 annotation.meta.network,
                                 annotation.meta.station))
 
-                        # No AdHocPick could be found that matches the
+                        # No Pick could be found that matches the
                         # current annotation. The reason for this could be
                         # a gap in waveform data such that two traces of
                         # the same stations are passed to the model
                         # therefore the model predicts a second time, but
-                        # since no AdHocPick is waiting for it, this
+                        # since no Pick is waiting for it, this
                         # prediction will be discarded. This problem should
                         # be addressed in future versions by providing clean
                         # data, beforehand, because it would be too difficult
@@ -568,12 +529,7 @@ class Repicker(ABC):
                         continue
 
                     assoc_ind.append(i)
-                    nslc = (
-                        pick.networkCode,
-                        pick.stationCode,
-                        pick.locationCode,
-                        pick.channelCode )
-                    annot_f = os.path.join(annot_d, "%s.%s.%s.%s.sac" % nslc)
+                    annot_f = os.path.join(annot_d, dotted_nslc(pick) + ".sac")
                     annotation.write(annot_f, format="SAC")
 
                     confidence = annotation.data.astype(np.double)
@@ -585,10 +541,9 @@ class Repicker(ABC):
                             predictions[pick.publicID] = []
                         new_item = (picktime, confidence[peak])
                         predictions[pick.publicID].append(new_item)
-                        logger.debug("#### " + pick.publicID +
-                                     "  %.3f" % confidence[peak])
+                        logger.debug("#### " + pick.publicID + "  %.3f" % confidence[peak])
 
-                    collected_adhoc_picks.remove(pick)
+                    collected_picks.remove(pick)
 
             except (TypeError, ValueError, ZeroDivisionError) as e:
                 logger.error("Caught "+repr(e))
@@ -599,14 +554,14 @@ class Repicker(ABC):
                 [annotations.pop(i) for i in sorted(assoc_ind, reverse=True)]
 
                 left_annos_n = len(annotations)
-                left_adhocs_n = len(collected_adhoc_picks)
+                left_adhocs_n = len(collected_picks)
                 if left_annos_n > 0:
                     logger.warning(
                         f"There were {left_annos_n} annotations that "
                         "could not be associated.")
                 if left_adhocs_n > 0:
                     logger.warning(
-                        f"There were {left_adhocs_n} AdHoc picks for "
+                        f"There were {left_adhocs_n} picks for "
                         "which no annotation was done.")
 
         # end of fill_result()
@@ -614,9 +569,9 @@ class Repicker(ABC):
 
         logger.info("ML predictions starts...")
 
-        annotations_dir = os.path.join(
+        annot_d = os.path.join(
             self.eventRootDir, eventID, self.annotDir)
-        os.makedirs(annotations_dir, exist_ok=True)
+        os.makedirs(annot_d, exist_ok=True)
 
         acc_predictions = {}
         picks_remain_size = picks_all_size = len(adhoc_picks)
@@ -626,9 +581,9 @@ class Repicker(ABC):
         while picks_remain_size > 0:
 
             picks_batch = adhoc_picks[start_index:end_index]
-            
+
             try:
-                _eventID, stream, collected_adhoc_picks = \
+                _eventID, stream, collected_picks = \
                     self._get_stream_from_picks(picks_batch, eventID)
             except Exception:
                 stream = None
@@ -638,9 +593,7 @@ class Repicker(ABC):
                 # could be true for the current batch of picks only, the
                 # next batch could be ok, therefore we just need to pass
                 # the following line
-                fill_result(
-                    acc_predictions, stream, collected_adhoc_picks,
-                    annotations_dir)
+                fill_result(acc_predictions, stream, collected_picks, annot_d)
 
             # Updating
             picks_remain_size -= self.batchSize
@@ -654,85 +607,15 @@ class Repicker(ABC):
 
 
 ##########################################################################
-# Attention: "TEPRepicker" and "TEPSWRepicker" are not available by standard
-# seisbench servers yet, you need to provide the corresponding files manually
-# in    ~/.seisbench/models/tepsw (old TEP)
-# resp. ~/.seisbench/models/tep   (new TEP).
-#
-# Note that the file names without suffix must match the string (dataset)
-# passed to from_pretrained() below.
-##########################################################################
-
-
-class TEPRepicker(Repicker, ABC):
-    """Transformer Earthquake Picker"""
-
-    def __init__(self, dataset='geofon', **kwargs):
-        if TEP is None:
-            raise NotImplementedError("Model 'tep' not available")
-        self.model_name = "tep"
-        self.model = TEP.from_pretrained(dataset)
-        super(TEPRepicker, self).__init__(**kwargs)
-        if self.minConfidence is None:
-            self.minConfidence = 0.3
-
-
-class TEPSWRepicker(Repicker, ABC):
-    """Transformer Earthquake Picker with Sliding Window"""
-
-    def __init__(self, dataset='geofon', **kwargs):
-        if TEPSW is None:
-            raise NotImplementedError("Model 'tepsw' not available")
-        self.model_name = "tep"
-        self.model = TEPSW.from_pretrained(dataset)
-        super(TEPSWRepicker, self).__init__(**kwargs)
-        if self.minConfidence is None:
-            self.minConfidence = 0.3
-
-
-##########################################################################
-
-# OTHER MODELS
-
-
-class EQTransformerRepicker(Repicker, ABC):
-    """EQTransformer"""
-
-    def __init__(self, dataset='geofon', **kwargs):
-        self.model_name = 'eqtransformer'
-        self.model = EQTransformer.from_pretrained(dataset)
-        super(EQTransformerRepicker, self).__init__(**kwargs)
-        if self.minConfidence is None:
-            self.minConfidence = 0.2
-
-
-class PhaseNetRepicker(Repicker, ABC):
-    """PhaseNet"""
-
-    def __init__(self, dataset='geofon', **kwargs):
-        self.model_name = 'phasenet'
-        self.model = PhaseNet.from_pretrained(dataset)
-        super(PhaseNetRepicker, self).__init__(**kwargs)
-        if self.minConfidence is None:
-            self.minConfidence = 0.3 # UNTESTED
-
-
-##########################################################################
 
 # Providing strings for the available picker model classes that can be
 # used as arguments for the script
 
-MODEL_MAP = {
-    'tep': TEPRepicker,
-    'tepsw': TEPSWRepicker,
-    'phasenet': PhaseNetRepicker,
-    'eqtransformer': EQTransformerRepicker,
-}
 
-
-def main(model, bs, t, e, dev, wkdir, evdir, spdir, andir, ds, conf):
-    repicker = MODEL_MAP[model](
-        dataset=ds,
+def main(model_name, bs, t, e, device, wkdir, evdir, spdir, andir, dataset, conf):
+    repicker = Repicker(
+        model_name=model_name,
+        dataset=dataset,
         test=t,
         exit=e,
         batchSize=bs,
@@ -740,7 +623,7 @@ def main(model, bs, t, e, dev, wkdir, evdir, spdir, andir, ds, conf):
         eventRootDir=evdir,
         spoolDir=spdir,
         annotDir=andir,
-        device=dev,
+        device=device,
         minConfidence=conf
     )
     repicker.run()
@@ -753,9 +636,7 @@ if __name__ == '__main__':
         '--model', choices=models, default=models[0], dest='model',
         help=f"Choose one of the available ML models to make the predictions."
              f" Note that if the model is not cached, it might take a " \
-             f"little while to download the weights file."
-             f" Also note that for tep and tepsw you will need to download and install the necessary "
-             f"files manually.")
+             f"little while to download the weights file.")
     parser.add_argument(
         '--test', action='store_true',
         help='Prevents the repicker from writing out outgoing yaml with refined picks.')
@@ -804,11 +685,11 @@ if __name__ == '__main__':
         bs=args.batchSize,
         t=args.test,
         e=args.exit,
-        dev=args.device,
+        device=args.device,
         wkdir=args.workingDir,
         evdir=args.eventRootDir,
         spdir=args.spoolDir,
         andir=args.annotDir,
-        ds=args.dataset,
+        dataset=args.dataset,
         conf=args.minConfidence
     )
