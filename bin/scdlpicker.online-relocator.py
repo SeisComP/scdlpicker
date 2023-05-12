@@ -28,7 +28,6 @@ This is a very simple online relocator that
 
 
 import sys
-import time
 import seiscomp.core
 import seiscomp.client
 import seiscomp.datamodel
@@ -42,12 +41,9 @@ import scdlpicker.relocation
 import scdlpicker.defaults
 
 
-
 def quality(origin):
     # similar role of origin score in scautoloc
-
-    return scdlpicker.util.arrivalCount(origin) # to be improved 
-
+    return scdlpicker.util.arrivalCount(origin)  # to be improved
 
 
 class RelocatorApp(seiscomp.client.Application):
@@ -80,19 +76,30 @@ class RelocatorApp(seiscomp.client.Application):
         # latest relocated origin per event
         self.relocated = dict()
 
-
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
-        self.commandline().addGroup("Config");
-        self.commandline().addStringOption("Config", "author", "Author of created objects");
-        self.commandline().addStringOption("Config", "agency", "Agency of created objects");
-        self.commandline().addGroup("Target");
-        self.commandline().addStringOption("Target", "event,E", "process the specified event and exit");
-        self.commandline().addStringOption("Target", "pick-authors", "space-separated whitelist of pick authors");
-        self.commandline().addDoubleOption("Target", "max-residual", "limit the individual pick residual to the specified value (in seconds)");
-        self.commandline().addDoubleOption("Target", "max-rms", "limit the pick residual RMS to the specified value (in seconds)");
-        self.commandline().addOption("Target", "test", "test mode - don't send the result");
 
+        self.commandline().addGroup("Config")
+        self.commandline().addStringOption(
+            "Config", "author", "Author of created objects")
+        self.commandline().addStringOption(
+            "Config", "agency", "Agency of created objects")
+
+        self.commandline().addGroup("Target")
+        self.commandline().addStringOption(
+            "Target", "event,E", "process the specified event and exit")
+        self.commandline().addStringOption(
+            "Target", "pick-authors",
+            "space-separated whitelist of pick authors")
+        self.commandline().addDoubleOption(
+            "Target", "max-residual",
+            "limit the individual pick residual to the specified value "
+            "(in seconds)")
+        self.commandline().addDoubleOption(
+            "Target", "max-rms",
+            "limit the pick residual RMS to the specified value (in seconds)")
+        self.commandline().addOption(
+            "Target", "test", "test mode - don't send the result")
 
     def init(self):
         if not super(RelocatorApp, self).init():
@@ -102,31 +109,26 @@ class RelocatorApp(seiscomp.client.Application):
 
         return True
 
-
     def handleTimeout(self):
         self.kickOffProcessing()
-
 
     def addObject(self, parentID, obj):
         # save new object received via messaging
         self.save(obj)
 
-
     def updateObject(self, parentID, obj):
         # save updated object received via messaging
         self.save(obj)
-
 
     def kickOffProcessing(self):
         # Check for each pending event if it is due to be processed
         for eventID in sorted(self.pendingEvents.keys()):
             if self.readyToProcess(eventID):
-                event = self.pendingEvents.pop(eventID)
+                self.pendingEvents.pop(eventID)
                 self.processEvent(eventID)
 
-
     def readyToProcess(self, eventID, minDelay=1080):
-        if not eventID in self.pendingEvents:
+        if eventID not in self.pendingEvents:
             seiscomp.logging.error("Missing event "+eventID)
             return False
         evt = self.pendingEvents[eventID]
@@ -134,7 +136,7 @@ class RelocatorApp(seiscomp.client.Application):
         if preferredOriginID not in self.origins:
             seiscomp.logging.debug("Loading origin "+preferredOriginID)
             org = scdlpicker.dbutil.loadOriginWithoutArrivals(
-                        self.query(), preferredOriginID)
+                self.query(), preferredOriginID)
             if not org:
                 return False
             self.origins[preferredOriginID] = org
@@ -147,7 +149,7 @@ class RelocatorApp(seiscomp.client.Application):
 
         try:
             author = org.creationInfo().author()
-        except:
+        except Exception:
             seiscomp.logging.warning(
                 "Author missing in origin %s" % preferredOriginID)
             author = "MISSING"
@@ -167,7 +169,6 @@ class RelocatorApp(seiscomp.client.Application):
 
         return True
 
-
     def getPicksReferencedByOrigin(self, origin, minWeight=0.5):
         picks = {}
         for i in range(origin.arrivalCount()):
@@ -178,14 +179,13 @@ class RelocatorApp(seiscomp.client.Application):
                     continue
                 if arr.weight() < minWeight:
                     continue
-            except:
+            except Exception:
                 continue
             pick = seiscomp.datamodel.Pick.Find(pickID)
             if not pick:
                 continue
             picks[pickID] = pick
         return picks
-
 
     def comparePicks(self, origin1, origin2):
         picks1 = self.getPicksReferencedByOrigin(origin1)
@@ -206,7 +206,6 @@ class RelocatorApp(seiscomp.client.Application):
 
         return common, only1, only2
 
-
     def improvement(self, origin1, origin2):
         """
         Test if origin2 is an improvement over origin1.
@@ -220,11 +219,10 @@ class RelocatorApp(seiscomp.client.Application):
 
         seiscomp.logging.debug("count %4d ->%4d" % (count1, count2))
 
-
         try:
             rms1 = max(origin1.quality().standardError(), 1.)
         except ValueError:
-            rms1 = 10. # FIXME hotfix
+            rms1 = 10.  # FIXME hotfix
 
         try:
             rms2 = max(origin2.quality().standardError(), 1.)
@@ -243,7 +241,6 @@ class RelocatorApp(seiscomp.client.Application):
 
         return q > 1
 
-
     def save(self, obj):
         evt = seiscomp.datamodel.Event.Cast(obj)
         if evt:
@@ -257,13 +254,12 @@ class RelocatorApp(seiscomp.client.Application):
             self.origins[org.publicID()] = org
             return
 
-
     def processEvent(self, eventID):
-        seiscomp.logging.info("Working on event "+eventID)
+        seiscomp.logging.info("Working on event " + eventID)
 
         connected = self.database().isConnected()
         seiscomp.logging.debug(
-                "Database connected "+("yes" if connected else "no"))
+            "Database connected " + ("yes" if connected else "no"))
 #       if connected:
 #           self.database().disconnect()
 #           seiscomp.logging.debug("reconnecting")
@@ -271,35 +267,36 @@ class RelocatorApp(seiscomp.client.Application):
 
         event = scdlpicker.dbutil.loadEvent(self.query(), eventID)
         if not event:
-            seiscomp.logging.warning("Failed to load event "+eventID)
+            seiscomp.logging.warning("Failed to load event " + eventID)
             return
 
         seiscomp.logging.debug("Loaded event "+eventID)
         origin = scdlpicker.dbutil.loadOriginWithoutArrivals(
-                self.query(), event.preferredOriginID())
-        seiscomp.logging.debug("Loaded origin "+origin.publicID())
-
+            self.query(), event.preferredOriginID())
+        seiscomp.logging.debug("Loaded origin " + origin.publicID())
 
         # adopt fixed depth according to incoming origin
-        defaultDepth = 10. # FIXME: no fixed 10 km here
-        if scdlpicker.util.hasFixedDepth(origin) and origin.depth().value()==defaultDepth:
-            fixed = True
+        defaultDepth = 10.  # FIXME: no fixed 10 km here
+        if scdlpicker.util.hasFixedDepth(origin) \
+                and origin.depth().value() == defaultDepth:
+            # fixed = True
             fixedDepth = origin.depth().value()
             seiscomp.logging.debug("setting fixed depth to %f km" % fixedDepth)
         else:
-            fixed = False
+            # fixed = False
             fixedDepth = None
             seiscomp.logging.debug("not fixing depth")
 
-        # Load all picks for a matching time span, independent of association. 
-        originWithArrivals, picks = scdlpicker.dbutil.loadPicksForOrigin(
-                        origin, self.inventory, self.allowedAuthorIDs,
-                        self.query())
-        seiscomp.logging.debug("arrivalCount=%d" % originWithArrivals.arrivalCount())
+        # Load all picks for a matching time span, independent of association.
+        originWithArrivals, picks = \
+            scdlpicker.dbutil.loadPicksForOrigin(
+                origin, self.inventory, self.allowedAuthorIDs, self.query())
+        seiscomp.logging.debug(
+            "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
         relocated = scdlpicker.relocation.relocate(
-                        originWithArrivals, eventID, fixedDepth,
-                        self.minimumDepth, self.maxResidual)
+            originWithArrivals, eventID, fixedDepth,
+            self.minimumDepth, self.maxResidual)
         if not relocated:
             seiscomp.logging.warning("%s: relocation failed" % eventID)
             return
@@ -325,18 +322,17 @@ class RelocatorApp(seiscomp.client.Application):
         seiscomp.datamodel.Notifier.Disable()
 
         if self.commandline().hasOption("test"):
-            seiscomp.logging.info("test mode - not sending "+relocated.publicID())
+            seiscomp.logging.info(
+                "test mode - not sending " + relocated.publicID())
         else:
             if self.connection().send(msg):
-                seiscomp.logging.info("sent "+relocated.publicID())
+                seiscomp.logging.info("sent " + relocated.publicID())
             else:
-                seiscomp.logging.info("failed to send "+relocated.publicID())
+                seiscomp.logging.info("failed to send " + relocated.publicID())
 
         self.relocated[eventID] = relocated
 
-
     def run(self):
-
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
         try:

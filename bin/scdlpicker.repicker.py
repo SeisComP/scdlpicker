@@ -101,8 +101,8 @@ class Repicker:
                  test=False, single_run=False, batch_size=False, device="cpu",
                  min_confidence=0.4, annot_d="annot"):
 
-        if not model_name in MODEL_MAP:
-            raise ValueError("No such model: "+model_name)
+        if model_name not in MODEL_MAP:
+            raise ValueError("No such model: " + model_name)
 
         self.model = MODEL_MAP[model_name].from_pretrained(dataset)
         self.model_name = model_name
@@ -196,7 +196,7 @@ class Repicker:
                 trace_len = s[0].stats.endtime - s[0].stats.starttime
                 if trace_len < self.expected_input_length_sec:
                     logger.warning(
-                        f"Trace {nslc} ({t[0].meta.channel}): "
+                        f"Trace {nslc} ({s[0].meta.channel}): "
                         "length {trace_len:.2f}s is too short. "
                         "Picker needs {self.expected_input_length_sec:.2f}s.")
                     break
@@ -272,7 +272,8 @@ class Repicker:
 
             for (ml_time, ml_conf) in preds:
                 logger.info("PICK   %s" % pick_id)
-                logger.info("RESULT %s  c= %.2f" % (timestamp(ml_time), ml_conf))
+                logger.info("RESULT %s  c= %.2f" %
+                            (timestamp(ml_time), ml_conf))
 
                 # FIXME: temporary criterion
                 # On one hand we want as small a time window as possible, but
@@ -453,87 +454,86 @@ class Repicker:
         return True
 
     def fill_result(self, predictions, stream, collected_picks, annot_d):
-            """Fills `predictions` with annotations done by the model
-               using the stream. Additional data will be taken from
-               `collected_picks`.
-            """
-            annotations, assoc_ind = None, None
-            try:
+        """Fills `predictions` with annotations done by the model
+           using the stream. Additional data will be taken from
+           `collected_picks`.
+        """
+        annotations, assoc_ind = None, None
+        try:
 
-                # ************ Model call ****************#
-                annotations = self.model.annotate(stream)
+            # ************ Model call ****************#
+            annotations = self.model.annotate(stream)
 
-                # Only use those predictions that were done for P wave onsets
-                annotations = list(filter(
-                    lambda a: a.id.split('.')[-1].endswith('_P'), annotations))
+            # Only use those predictions that were done for P wave onsets
+            annotations = list(filter(
+                lambda a: a.id.split('.')[-1].endswith('_P'), annotations))
 
-                # indexes list of successfully associated annotations
-                assoc_ind = []
-                for i, annotation in enumerate(annotations):
-                    try:
-                        # Associate the annotation to a Pick
+            # indexes list of successfully associated annotations
+            assoc_ind = []
+            for i, annotation in enumerate(annotations):
+                try:
+                    # Associate the annotation to a Pick
 
-                        pick = next(filter(
-                            lambda p:
-                            p.networkCode == annotation.meta.network and
-                            p.stationCode == annotation.meta.station and
-                            p.locationCode == annotation.meta.location,
-                            collected_picks))
-                    except StopIteration:
-                        logger.warning(
-                            "failed to associate annotation for %s.%s" % (
-                                annotation.meta.network,
-                                annotation.meta.station))
-
-                        # No Pick could be found that matches the
-                        # current annotation. The reason for this could be
-                        # a gap in waveform data such that two traces of
-                        # the same stations are passed to the model
-                        # therefore the model predicts a second time, but
-                        # since no Pick is waiting for it, this
-                        # prediction will be discarded. This problem should
-                        # be addressed in future versions by providing clean
-                        # data, beforehand, because it would be too difficult
-                        # to decide right here which pick is the better one
-                        # resp. the one wanted.
-                        continue
-
-                    assoc_ind.append(i)
-                    annot_f = os.path.join(annot_d, dotted_nslc(pick) + ".sac")
-                    annotation.write(annot_f, format="SAC")
-
-                    confidence = annotation.data.astype(np.double)
-                    times = annotation.times()
-                    peaks, _ = scipy.signal.find_peaks(confidence, height=0.1)
-                    for peak in peaks:
-                        picktime = annotation.stats.starttime + times[peak]
-                        if pick.publicID not in predictions:
-                            predictions[pick.publicID] = []
-                        new_item = (picktime, confidence[peak])
-                        predictions[pick.publicID].append(new_item)
-                        logger.debug("#### " + pick.publicID
-                            + "  %.3f" % confidence[peak])
-
-                    collected_picks.remove(pick)
-
-            except (TypeError, ValueError, ZeroDivisionError) as e:
-                logger.error("Caught "+repr(e))
-
-            if None not in [annotations, assoc_ind]:
-
-                # Clean annotations from those who were associated successfully
-                [annotations.pop(i) for i in sorted(assoc_ind, reverse=True)]
-
-                left_annos_n = len(annotations)
-                left_adhocs_n = len(collected_picks)
-                if left_annos_n > 0:
+                    pick = next(filter(
+                        lambda p:
+                        p.networkCode == annotation.meta.network and
+                        p.stationCode == annotation.meta.station and
+                        p.locationCode == annotation.meta.location,
+                        collected_picks))
+                except StopIteration:
                     logger.warning(
-                        f"There were {left_annos_n} annotations that "
-                        "could not be associated.")
-                if left_adhocs_n > 0:
-                    logger.warning(
-                        f"There were {left_adhocs_n} picks for "
-                        "which no annotation was done.")
+                        "failed to associate annotation for %s.%s" % (
+                            annotation.meta.network,
+                            annotation.meta.station))
+
+                    # No Pick could be found that matches the
+                    # current annotation. The reason for this could be
+                    # a gap in waveform data such that two traces of
+                    # the same stations are passed to the model
+                    # therefore the model predicts a second time, but
+                    # since no Pick is waiting for it, this
+                    # prediction will be discarded. This problem should
+                    # be addressed in future versions by providing clean
+                    # data, beforehand, because it would be too difficult
+                    # to decide right here which pick is the better one
+                    # resp. the one wanted.
+                    continue
+
+                assoc_ind.append(i)
+                annot_f = os.path.join(annot_d, dotted_nslc(pick) + ".sac")
+                annotation.write(annot_f, format="SAC")
+
+                confidence = annotation.data.astype(np.double)
+                times = annotation.times()
+                peaks, _ = scipy.signal.find_peaks(confidence, height=0.1)
+                for peak in peaks:
+                    picktime = annotation.stats.starttime + times[peak]
+                    if pick.publicID not in predictions:
+                        predictions[pick.publicID] = []
+                    new_item = (picktime, confidence[peak])
+                    predictions[pick.publicID].append(new_item)
+                    logger.debug("#### " + pick.publicID +
+                                 "  %.3f" % confidence[peak])
+
+                collected_picks.remove(pick)
+
+        except (TypeError, ValueError, ZeroDivisionError) as e:
+            logger.error("Caught "+repr(e))
+
+        if None not in [annotations, assoc_ind]:
+            # Clean annotations from those who were associated successfully
+            [annotations.pop(i) for i in sorted(assoc_ind, reverse=True)]
+
+            left_annos_n = len(annotations)
+            left_adhocs_n = len(collected_picks)
+            if left_annos_n > 0:
+                logger.warning(
+                    f"There were {left_annos_n} annotations that "
+                    "could not be associated.")
+            if left_adhocs_n > 0:
+                logger.warning(
+                    f"There were {left_adhocs_n} picks for "
+                    "which no annotation was done.")
 
     def _ml_predict(self, adhoc_picks, eventID):
         """
@@ -543,7 +543,6 @@ class Repicker:
         Returns:
             dict: a dictionary of `pickID: (time, confidence)` pairs
         """
-
 
         logger.debug("Starting prediction")
 
@@ -556,7 +555,8 @@ class Repicker:
         start_index, end_index = 0, min(self.batch_size, picks_all_size)
 
         # Batch loop
-        # We process the input data in batches with the size defined by batch_size
+        # We process the input data in batches with the size defined
+        # by batch_size
         while picks_remain_size > 0:
             logger.debug(f"ML prediction {picks_remain_size} remaining picks")
             picks_batch = adhoc_picks[start_index:end_index]
@@ -572,7 +572,8 @@ class Repicker:
                 # could be true for the current batch of picks only, the
                 # next batch could be ok, therefore we just need to pass
                 # the following line
-                self.fill_result(acc_predictions, stream, collected_picks, annot_d)
+                self.fill_result(
+                    acc_predictions, stream, collected_picks, annot_d)
 
             # Prepare for next batch
             picks_remain_size -= self.batch_size
@@ -596,30 +597,29 @@ if __name__ == '__main__':
         description='SeicComp Client - ML Repicker using SeisBench')
     parser.add_argument(
         '--model', choices=models, default=models[0], dest='model_name',
-        help=f"Choose one of the available ML models to make the predictions."
-             f" Note that if the model is not cached, it might take a " \
-             f"little while to download the weights file.")
+        help="Choose one of the available ML models to make the predictions."
+             " Note that if the model is not cached, it might take a "
+             "little while to download the weights file.")
     parser.add_argument(
         '--test', action='store_true',
-        help='Prevents the repicker from writing out outgoing yaml with refined picks.')
+        help="Test mode - don't write outgoing yaml with refined picks.")
     parser.add_argument(
         '--exit', action='store_true', dest="single_run",
         help='Exit after items in spool folder have been processed')
     parser.add_argument(
         '--bs', '--batch-size', action='store_const', const=50, default=50,
         dest='batch_size',
-        help="Set the batch size. Should be suitable for the hardware used."
-             " The default is 50.")
+        help="Set batch size. Should be suitable for the hardware used [50]")
     parser.add_argument(
         '--device', choices=['cpu', 'gpu'], default='cpu',
-        help="If you have access to cuda device change this parameter to 'gpu'.")
+        help="With access to a cuda device change this parameter to 'gpu'.")
     parser.add_argument(
         '--working-dir', type=str, default='.', dest='working_d',
         help="Working directory where all files are placed and exchanged")
     parser.add_argument(
         '--event-dir', type=str, default='', dest='eventroot_d',
         help="Where to look for event folders with waveforms and picks and "
-            "where to store annotations per each event")
+             "where to store annotations per each event")
     parser.add_argument(
         '--spool-dir', type=str, default='', dest='spool_d',
         help="Where to look for new symlinks to YAML files that can be "
@@ -632,10 +632,10 @@ if __name__ == '__main__':
         help="outgoing directory where all result files are written")
     parser.add_argument(
         '--dataset', type=str, default='geofon', dest='dataset',
-        help="The dataset on which the model was predicted. Defaults to geofon.")
+        help="The dataset on which the model was predicted [geofon].")
     parser.add_argument(
         '--min-confidence', type=float, default=0.3, dest='min_confidence',
-        help="Confidence threshold below which a pick is skipped. Defaults to 0.3")
+        help="Confidence threshold below which a pick is skipped [0.3]")
     args = parser.parse_args()
 
     if not args.eventroot_d:
