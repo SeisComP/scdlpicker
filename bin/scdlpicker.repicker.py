@@ -60,6 +60,10 @@ def dotted_nslc(pick):
         pick.channelCode )
 
 
+def timestamp(t):
+    return (t.isoformat() + "000000")[:23] + "Z"
+
+
 class Repicker:
     """A class to hold settings and provide methods for arbitrary seisbench
     compatible P wave pickers.
@@ -78,24 +82,24 @@ class Repicker:
     The refined picks are written into YAML files inside `outgoing/`.
 
     Args:
-        eventRootDir(str): Directory containing event folders, used to
+        eventroot_d(str): Directory containing event folders, used to
                            store annotations.
 
-        spoolDir(str): Directory to watch for links to yaml files
+        spool_d(str): Directory to watch for links to yaml files
 
         test(bool): To test the main functionality, stops before writing
                     outgoing files
 
-        batchSize(int): Repicker will set the size of a batch to this
+        batch_size(int): Repicker will set the size of a batch to this
                         (at maximum)
 
         device(str): Defines where to run the model - "cpu" or "gpu"
     """
 
     def __init__(self, model_name=None, dataset="geofon",
-                 workingDir=".", eventRootDir="events", spoolDir="spool",
-                 test=False, exit=False, batchSize=False, device="cpu",
-                 minConfidence=None, annotDir="annot"):
+                 working_d=".", eventroot_d="events", spool_d="spool",
+                 test=False, single_run=False, batch_size=False, device="cpu",
+                 min_confidence=0.4, annot_d="annot"):
 
         if not model_name in MODEL_MAP:
             raise ValueError("No such model: "+model_name)
@@ -104,14 +108,14 @@ class Repicker:
         self.model_name = model_name
 
         self.test = test
-        self.exit = exit
-        self.workingDir = workingDir
-        self.eventRootDir = eventRootDir
-        self.spoolDir = spoolDir
-        self.batchSize = batchSize
+        self.single_run = single_run
+        self.working_d = working_d
+        self.eventroot_d = eventroot_d
+        self.spool_d = spool_d
+        self.batch_size = batch_size
         self.workspaces = dict()
-        self.minConfidence = minConfidence
-        self.annotDir = annotDir
+        self.min_confidence = min_confidence
+        self.annot_d = annot_d
 
         if device == "cpu":
             self.model.cpu()
@@ -122,7 +126,7 @@ class Repicker:
             self.model.in_samples / self.model.sampling_rate
 
     def _get_stream_from_picks(self, picks, eventID) \
-            -> Tuple[str, obspy.core.stream.Stream, list]:
+            -> Tuple[obspy.core.stream.Stream, list]:
         """
         For the given picks, read the corresponding streams and return them.
 
@@ -133,8 +137,8 @@ class Repicker:
 
         # Collect streams from mseed files
         collected_picks = []
-        stream = None
-        eventRootDir = self.eventRootDir
+        stream = obspy.core.stream.Stream()
+        eventroot_d = self.eventroot_d
         for pick in picks:
             pick: Pick
             pickID = pick.publicID
@@ -146,52 +150,36 @@ class Repicker:
 
             # Create an obspy stream from according mseed files
 
-            waveforms_d = os.path.join(eventRootDir, eventID, "waveforms")
+            waveforms_d = os.path.join(eventroot_d, eventID, "waveforms")
 
-            # Look for the Z component
-            fileZ = os.path.join(waveforms_d, nslc + "Z" + ".mseed")
-            if not os.path.exists(fileZ):
-                fileZ = None
+            files = []
+            for components in [("Z",), ("N", "1"), ("E", "2")]:
+                for c in components:
+                    file = os.path.join(waveforms_d, nslc + c + ".mseed")
+                    if os.path.exists(file):
+                        break
+                else:
+                    file = None
+                if file:
+                    files.append(file)
 
-            # Look for the N or 1 component
-            for component in ["N", "1"]:
-                fileN = os.path.join(waveforms_d, nslc + component + '.mseed')
-                if os.path.exists(fileN):
-                    break
-            else:
-                fileN = None
-
-            # Look for the E or 2 component
-            for component in ["E", "2"]:
-                fileE = os.path.join(waveforms_d, nslc + component + '.mseed')
-                if os.path.exists(fileE):
-                    break
-            else:
-                fileE = None
-
-            # Check for missing files
-            if not fileZ and not fileN and not fileE:
-                # no data at all -> no debug message needed
+            if len(files) < 3:
                 logger.debug("---- " + pickID)
-                logger.debug("---- not enough data -> skipped")
-                continue
-            if not fileZ or not fileN or not fileE:
-                # partly missing data
-                logger.debug("---- " + pickID)
-                logger.debug("---- missing components -> skipped")
+                if not files:
+                    logger.debug("---- not enough data -> skipped")
+                else:
+                    logger.debug("---- missing components -> skipped")
                 continue
 
             # All needed files exist
             logger.debug("++++ " + pickID)
 
-            streamZ, streamE, streamN = None, None, None
+            streams = []
 
             # We try to open all three component files and if we fail on
             # any of these we give up.
             try:
-                streamZ = obspy.core.stream.read(fileZ)
-                streamN = obspy.core.stream.read(fileN)
-                streamE = obspy.core.stream.read(fileE)
+                streams = [obspy.core.stream.read(f) for f in files]
             # The following are all real-life exceptions observed in the past
             # and which we tolerate for the time being.
             except (TypeError, ValueError,
@@ -203,19 +191,9 @@ class Repicker:
             except Exception as e:
                 logger.warning("Unknown exception: " + str(e))
 
-            if None in (streamZ, streamE, streamE):
-                logger.warning(
-                    f" {nslc}: Didn't find mseed files for all components.")
-                continue
-            else:
-                [ _.merge(method=1, fill_value=0, interpolation_samples=0)
-                    for _ in [streamZ, streamE, streamN]]
-            if not stream:
-                stream = obspy.core.stream.Stream()
-
             # Check if trace is shorter than needed
-            for t in (streamZ, streamE, streamN):
-                trace_len = t[0].stats.endtime - t[0].stats.starttime
+            for s in streams:
+                trace_len = s[0].stats.endtime - s[0].stats.starttime
                 if trace_len < self.expected_input_length_sec:
                     logger.warning(
                         f"Trace {nslc} ({t[0].meta.channel}): "
@@ -223,14 +201,17 @@ class Repicker:
                         "Picker needs {self.expected_input_length_sec:.2f}s.")
                     break
             else:
-                stream += streamZ
-                stream += streamN
-                stream += streamE
+                for s in streams:
+                    stream += s
                 collected_picks.append(pick)
+
         if len(collected_picks) == 0:
             logger.debug(f"Empty stream for event {eventID}.")
 
-        return eventID, stream, collected_picks
+        if len(stream) == 0:
+            stream = None
+
+        return stream, collected_picks
 
     def _process(self, adhoc_picks, eventID):
         """
@@ -245,7 +226,7 @@ class Repicker:
             self.workspaces[eventID] = EventWorkspaceContainer()
         workspace = self.workspaces[eventID]
 
-        # retrieve additional picks from ep
+        # Retrieve additional picks from ep
         new_adhoc_picks = []
         for pick in adhoc_picks:
             pick_id = pick.publicID
@@ -267,7 +248,7 @@ class Repicker:
         if not new_adhoc_picks:
             return []
 
-        # extra debug output to see if we accidentally process
+        # Extra debug output to see if we accidentally process
         # any "new" picks twice
         for pick in new_adhoc_picks:
             logger.debug("NEW PICK %s" % pick.publicID)
@@ -290,21 +271,20 @@ class Repicker:
             triggering_pick = workspace.picks[pick_id]
 
             for (ml_time, ml_conf) in preds:
-                ml_timestamp = (ml_time.isoformat() + "000000")[:23] + "Z"
                 logger.info("PICK   %s" % pick_id)
-                logger.info("RESULT %s  c= %.2f" % (ml_timestamp, ml_conf))
+                logger.info("RESULT %s  c= %.2f" % (timestamp(ml_time), ml_conf))
 
                 # FIXME: temporary criterion
-                # On one hand we want as small a time window as
-                # possible, but on the other hand it must be large
-                # enough to accommodate large due to wrong source depth.
-                # TODO: iteration!
+                # On one hand we want as small a time window as possible, but
+                # on the other hand it must be large enough to accommodate
+                # residuals due to wrong source depth.
+                # TODO: iterate!
                 dt_max = 10
                 dt = abs(ml_time - obspy.UTCDateTime(triggering_pick.time))
                 if abs(dt) > dt_max:
                     logger.info("SKIPPED dt = %.2f" % dt)
                     continue
-                if ml_conf < self.minConfidence:
+                if ml_conf < self.min_confidence:
                     logger.info("SKIPPED conf = %.3f" % ml_conf)
                     continue
                 old_pick = workspace.picks[pick_id]
@@ -312,8 +292,7 @@ class Repicker:
                 new_pick.publicID = old_pick.publicID + "/repick"
                 new_pick.model = self.model_name
                 new_pick.confidence = float("%.3f" % ml_conf)
-                new_pick.time = ml_timestamp
-                # FIXME: new_pick.time is an isotimestamp without uncertainties
+                new_pick.time = timestamp(ml_time)
 
                 # The key of the ML pick is the publicID of the
                 # original pick in order to make association easier.
@@ -329,7 +308,7 @@ class Repicker:
         return new_picks
 
     def _findSpoolItems(self):
-        d = self.spoolDir
+        d = self.spool_d
         filenames = [i for i in os.listdir(d) if i.endswith(".yaml")]
         items = list()
         for filename in sorted(filenames):
@@ -381,7 +360,7 @@ class Repicker:
             - if successful and not in test mode, remove symlink
         """
         try:
-            os.makedirs(self.spoolDir)
+            os.makedirs(self.spool_d)
         except FileExistsError:
             pass
 
@@ -426,11 +405,11 @@ class Repicker:
                 logger.info("+++test mode - stopping")
                 continue
 
-            eventDir = os.path.join(self.eventRootDir, eventID)
+            event_d = os.path.join(self.eventroot_d, eventID)
             # directory to which we write the resulting yaml files
-            out_d = os.path.join(eventDir, "out")
+            out_d = os.path.join(event_d, "out")
 
-            outgoing_d = os.path.join(self.workingDir, "outgoing")
+            outgoing_d = os.path.join(self.working_d, "outgoing")
 
             os.makedirs(outgoing_d, exist_ok=True)
 
@@ -442,7 +421,7 @@ class Repicker:
 
             dst = os.path.join(outgoing_d, f)
             # TODO: clean up!
-            src = os.path.join("..", self.eventRootDir, eventID, "out", f)
+            src = os.path.join("..", self.eventroot_d, eventID, "out", f)
 
             try:
                 logging.debug("creating symlink %s -> %s" % (dst, src))
@@ -467,22 +446,13 @@ class Repicker:
             self._poll()
             time.sleep(1)
 
-            if self.exit:
-                logger.info("+++exit mode - exiting")
+            if self.single_run:
+                logger.info("+++single-run mode - exiting")
                 break
 
         return True
 
-    def _ml_predict(self, adhoc_picks, eventID):
-        """ Takes a list of Pick instances, repicks them,
-        fills a dictionary with those predictions,
-        each a (Time, confidence) pair, and returns it.
-
-        Returns:
-            dict: a dictionary of `pickID: (time, confidence)` pairs
-        """
-
-        def fill_result(predictions, stream, collected_picks, annot_d):
+    def fill_result(self, predictions, stream, collected_picks, annot_d):
             """Fills `predictions` with annotations done by the model
                using the stream. Additional data will be taken from
                `collected_picks`.
@@ -541,7 +511,8 @@ class Repicker:
                             predictions[pick.publicID] = []
                         new_item = (picktime, confidence[peak])
                         predictions[pick.publicID].append(new_item)
-                        logger.debug("#### " + pick.publicID + "  %.3f" % confidence[peak])
+                        logger.debug("#### " + pick.publicID
+                            + "  %.3f" % confidence[peak])
 
                     collected_picks.remove(pick)
 
@@ -564,26 +535,34 @@ class Repicker:
                         f"There were {left_adhocs_n} picks for "
                         "which no annotation was done.")
 
-        # end of fill_result()
+    def _ml_predict(self, adhoc_picks, eventID):
+        """
+        Based on a list of picks, perform repicking and fill a dict with
+        the predictions, each a (Time, confidence) pair, and returns it.
+
+        Returns:
+            dict: a dictionary of `pickID: (time, confidence)` pairs
+        """
 
 
-        logger.info("ML predictions starts...")
+        logger.debug("Starting prediction")
 
         annot_d = os.path.join(
-            self.eventRootDir, eventID, self.annotDir)
+            self.eventroot_d, eventID, self.annot_d)
         os.makedirs(annot_d, exist_ok=True)
 
         acc_predictions = {}
         picks_remain_size = picks_all_size = len(adhoc_picks)
-        start_index, end_index = 0, min(self.batchSize, picks_all_size)
+        start_index, end_index = 0, min(self.batch_size, picks_all_size)
 
-        # **** Batch loop:  *****#
+        # Batch loop
+        # We process the input data in batches with the size defined by batch_size
         while picks_remain_size > 0:
-
+            logger.debug(f"ML prediction {picks_remain_size} remaining picks")
             picks_batch = adhoc_picks[start_index:end_index]
 
             try:
-                _eventID, stream, collected_picks = \
+                stream, collected_picks = \
                     self._get_stream_from_picks(picks_batch, eventID)
             except Exception:
                 stream = None
@@ -593,16 +572,16 @@ class Repicker:
                 # could be true for the current batch of picks only, the
                 # next batch could be ok, therefore we just need to pass
                 # the following line
-                fill_result(acc_predictions, stream, collected_picks, annot_d)
+                self.fill_result(acc_predictions, stream, collected_picks, annot_d)
 
-            # Updating
-            picks_remain_size -= self.batchSize
-            start_index += self.batchSize
+            # Prepare for next batch
+            picks_remain_size -= self.batch_size
+            start_index += self.batch_size
             end_index = min(
-                start_index + self.batchSize,
+                start_index + self.batch_size,
                 start_index + picks_remain_size)
 
-        logger.info("...ML prediction ended.")
+        logger.debug("Finished prediction.")
         return acc_predictions
 
 
@@ -611,29 +590,12 @@ class Repicker:
 # Providing strings for the available picker model classes that can be
 # used as arguments for the script
 
-
-def main(model_name, bs, t, e, device, wkdir, evdir, spdir, andir, dataset, conf):
-    repicker = Repicker(
-        model_name=model_name,
-        dataset=dataset,
-        test=t,
-        exit=e,
-        batchSize=bs,
-        workingDir=wkdir,
-        eventRootDir=evdir,
-        spoolDir=spdir,
-        annotDir=andir,
-        device=device,
-        minConfidence=conf
-    )
-    repicker.run()
-
-
 if __name__ == '__main__':
     models = list(MODEL_MAP.keys())
-    parser = argparse.ArgumentParser(description='SeicComp Client - ML Repicker using SeisBench')
+    parser = argparse.ArgumentParser(
+        description='SeicComp Client - ML Repicker using SeisBench')
     parser.add_argument(
-        '--model', choices=models, default=models[0], dest='model',
+        '--model', choices=models, default=models[0], dest='model_name',
         help=f"Choose one of the available ML models to make the predictions."
              f" Note that if the model is not cached, it might take a " \
              f"little while to download the weights file.")
@@ -641,55 +603,59 @@ if __name__ == '__main__':
         '--test', action='store_true',
         help='Prevents the repicker from writing out outgoing yaml with refined picks.')
     parser.add_argument(
-        '--exit', action='store_true',
+        '--exit', action='store_true', dest="single_run",
         help='Exit after items in spool folder have been processed')
     parser.add_argument(
-        '--bs', '--batch-size', action='store_const', const=50, default=50, dest='batchSize',
-        help="Choose a batch size that is suitable for the machine you are working on. Defaults to 50.")
+        '--bs', '--batch-size', action='store_const', const=50, default=50,
+        dest='batch_size',
+        help="Set the batch size. Should be suitable for the hardware used."
+             " The default is 50.")
     parser.add_argument(
         '--device', choices=['cpu', 'gpu'], default='cpu',
         help="If you have access to cuda device change this parameter to 'gpu'.")
     parser.add_argument(
-        '--working-dir', type=str, default='.', dest='workingDir',
+        '--working-dir', type=str, default='.', dest='working_d',
         help="Working directory where all files are placed and exchanged")
     parser.add_argument(
-        '--event-dir', type=str, default='', dest='eventRootDir',
-        help="Where to look for event folders with waveforms and picks and where to store annotations "
-            "per each event")
+        '--event-dir', type=str, default='', dest='eventroot_d',
+        help="Where to look for event folders with waveforms and picks and "
+            "where to store annotations per each event")
     parser.add_argument(
-        '--spool-dir', type=str, default='', dest='spoolDir',
-        help="Where to look for new symlinks to YAML files that can be processed by the repicker.")
+        '--spool-dir', type=str, default='', dest='spool_d',
+        help="Where to look for new symlinks to YAML files that can be "
+             "processed by the repicker.")
     parser.add_argument(
-        '--annot-dir', type=str, default="annot", dest='annotDir',
+        '--annot-dir', type=str, default="annot", dest='annot_d',
         help="Where to write the annotations to, inside events/<event>/.")
     parser.add_argument(
-        '--outgoing-dir', type=str, default='', dest='outgoingDir',
+        '--outgoing-dir', type=str, default='', dest='outgoing_d',
         help="outgoing directory where all result files are written")
     parser.add_argument(
         '--dataset', type=str, default='geofon', dest='dataset',
         help="The dataset on which the model was predicted. Defaults to geofon.")
     parser.add_argument(
-        '--min-confidence', type=float, default=0.3, dest='minConfidence',
+        '--min-confidence', type=float, default=0.3, dest='min_confidence',
         help="Confidence threshold below which a pick is skipped. Defaults to 0.3")
     args = parser.parse_args()
 
-    if not args.eventRootDir:
-        args.eventRootDir = os.path.join(args.workingDir, "events")
-    if not args.spoolDir:
-        args.spoolDir = os.path.join(args.workingDir, "spool")
-    if not args.outgoingDir:
-        args.outgoingDir = os.path.join(args.workingDir, "outgoing")
+    if not args.eventroot_d:
+        args.eventroot_d = os.path.join(args.working_d, "events")
+    if not args.spool_d:
+        args.spool_d = os.path.join(args.working_d, "spool")
+#   if not args.outgoing_d:
+#       args.outgoing_d = os.path.join(args.working_d, "outgoing")
 
-    main(
-        args.model,
-        bs=args.batchSize,
-        t=args.test,
-        e=args.exit,
-        device=args.device,
-        wkdir=args.workingDir,
-        evdir=args.eventRootDir,
-        spdir=args.spoolDir,
-        andir=args.annotDir,
+    repicker = Repicker(
+        model_name=args.model_name,
         dataset=args.dataset,
-        conf=args.minConfidence
+        test=args.test,
+        single_run=args.single_run,
+        batch_size=args.batch_size,
+        working_d=args.working_d,
+        eventroot_d=args.eventroot_d,
+        spool_d=args.spool_d,
+        annot_d=args.annot_d,
+        device=args.device,
+        min_confidence=args.min_confidence
     )
+    repicker.run()

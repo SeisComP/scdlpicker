@@ -21,6 +21,7 @@ import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.io
 import math
+import sys
 
 
 

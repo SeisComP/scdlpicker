@@ -215,9 +215,33 @@ class RelocatorApp(seiscomp.client.Application):
         It doesn't take pick status/authorship into account.
         """
         common, only1, only2 = self.comparePicks(origin1, origin2)
-        if len(only2) > len(only1):
+        count1 = len(only1) + len(common)
+        count2 = len(only2) + len(common)
+
+        seiscomp.logging.debug("count %4d ->%4d" % (count1, count2))
+
+
+        try:
+            rms1 = max(origin1.quality().standardError(), 1.)
+        except ValueError:
+            rms1 = 10. # FIXME hotfix
+
+        try:
+            rms2 = max(origin2.quality().standardError(), 1.)
+        except ValueError:
+            seiscomp.logging.debug("origin2 without standardError")
+            rms2 = 1.
+
+        seiscomp.logging.debug("count %4d ->%4d" % (count1, count2))
+        seiscomp.logging.debug("rms   %4.1f ->%4.1f" % (rms1, rms2))
+
+        if count1 == 0:
             return True
-        return False
+
+        q = (count2/count1)**2 * (rms1/rms2)
+        seiscomp.logging.debug("improvement  %.3f" % q)
+
+        return q > 1
 
 
     def save(self, obj):
@@ -237,9 +261,22 @@ class RelocatorApp(seiscomp.client.Application):
     def processEvent(self, eventID):
         seiscomp.logging.info("Working on event "+eventID)
 
-        event  = scdlpicker.dbutil.loadEvent(self.query(), eventID)
+        connected = self.database().isConnected()
+        seiscomp.logging.debug(
+                "Database connected "+("yes" if connected else "no"))
+#       if connected:
+#           self.database().disconnect()
+#           seiscomp.logging.debug("reconnecting")
+#           self.database().connect(self.databaseURI())
+
+        event = scdlpicker.dbutil.loadEvent(self.query(), eventID)
+        if not event:
+            seiscomp.logging.warning("Failed to load event "+eventID)
+            return
+
         seiscomp.logging.debug("Loaded event "+eventID)
-        origin = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
+        origin = scdlpicker.dbutil.loadOriginWithoutArrivals(
+                self.query(), event.preferredOriginID())
         seiscomp.logging.debug("Loaded origin "+origin.publicID())
 
 

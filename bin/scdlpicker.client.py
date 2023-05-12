@@ -145,7 +145,7 @@ def gappy(waveforms, tolerance=0.5):
     return gapCount
 
 
-class OriginStreamApp(seiscomp.client.Application):
+class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
         # adopt the defaults from the top of this script
@@ -160,7 +160,7 @@ class OriginStreamApp(seiscomp.client.Application):
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
         self.tryUpickedStations = tryUpickedStations
 
-        super(OriginStreamApp, self).__init__(argc, argv)
+        super(App, self).__init__(argc, argv)
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
 
@@ -186,7 +186,7 @@ class OriginStreamApp(seiscomp.client.Application):
         # Called BEFORE validateParameters()
 
         seiscomp.logging.error("initConfigurarion(self)")
-        if not super(OriginStreamApp, self).initConfiguration():
+        if not super(App, self).initConfiguration():
             return False
 
         try:
@@ -266,7 +266,7 @@ class OriginStreamApp(seiscomp.client.Application):
         """
         Command-line parameters
         """
-        if not super(OriginStreamApp, self).validateParameters():
+        if not super(App, self).validateParameters():
             return False
 
         try:
@@ -319,7 +319,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
 
     def init(self):
-        if not super(OriginStreamApp, self).init():
+        if not super(App, self).init():
             return False
 
         self.setupFolders()
@@ -526,10 +526,17 @@ class OriginStreamApp(seiscomp.client.Application):
                 stream.addStream(net, sta, _loc, cha[:2] + c, t1, t2)
                 streamCount += 1
         seiscomp.logging.info("RecordStream: requested %d streams" % streamCount)
-        for rec in scdlpicker.util.RecordIterator(stream):
+        count = 0
+        for rec in scdlpicker.util.RecordIterator(stream, showprogress=True):
+            if rec is None:
+                break
             if not rec.streamID() in waveforms:
                 waveforms[rec.streamID()] = []
             waveforms[rec.streamID()].append(rec)
+            count += 1
+        seiscomp.logging.debug(
+            "RecordStream: received  %d records" % (count,))
+
         count = 0
         for key in waveforms:
             count += len(waveforms[key])
@@ -801,7 +808,10 @@ class OriginStreamApp(seiscomp.client.Application):
                 arr = origin.arrival(i)
                 if arr.weight() < 0.5:
                     continue
-                delta.append(arr.distance())
+                try:
+                    delta.append(arr.distance())
+                except ValueError:
+                    continue
             delta.sort()
 
             # As maximum distance use the average distance
@@ -897,6 +907,7 @@ class OriginStreamApp(seiscomp.client.Application):
 
         picks = {}
         confs = {}
+        comms = {}
         with open(path) as yf:
             ci = self._creationInfo()
 
@@ -929,8 +940,20 @@ class OriginStreamApp(seiscomp.client.Application):
                 wfid.setChannelCode(c)
                 pick.setWaveformID(wfid)
 
+                comments = []
+
+                comment = seiscomp.datamodel.Comment()
+                comment.setText(p["model"])
+                comment.setId("dlmodel")
+                comments.append(comment)
+
                 conf = float(p["confidence"])
                 
+                comment = seiscomp.datamodel.Comment()
+                comment.setText("%.3f" % p["confidence"])
+                comment.setId("confidence")
+                comments.append(comment)
+
                 if pickID in picks:
                     # only override existing pick with higher
                     # confidence pick
@@ -938,6 +961,7 @@ class OriginStreamApp(seiscomp.client.Application):
                         continue
                 picks[pickID] = pick
                 confs[pickID] = conf
+                comms[pickID] = comments
                 
 
             for pickID in picks:
@@ -949,7 +973,7 @@ class OriginStreamApp(seiscomp.client.Application):
                 pick.setPhaseHint(phase)
                 pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 
-        return picks
+        return picks, comms
 
 
     def pollRepickerResults(self):
@@ -969,13 +993,20 @@ class OriginStreamApp(seiscomp.client.Application):
 
         for path in sorted(todolist):
             seiscomp.logging.info("pollRepickerResults: working on "+path)
-            picks = self.readResults(path)
 
             ep = seiscomp.datamodel.EventParameters()
+            picks, comments = self.readResults(path)
             seiscomp.datamodel.Notifier.Enable()
             for pickID in picks:
                 pick = picks[pickID]
+                # It is essential to first add the pick to the
+                # EventParameters and then the comments to the pick.
+                # This is why self.readResults returns picks and
+                # comments separately.
                 ep.add(pick)
+                if pickID in comments:
+                    for comment in comments[pickID]:
+                        pick.add(comment)
             msg = seiscomp.datamodel.Notifier.GetMessage()
             seiscomp.datamodel.Notifier.Disable()
             if self.connection().send(msg):
@@ -1008,11 +1039,11 @@ class OriginStreamApp(seiscomp.client.Application):
         self.enableTimer(1)
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(False)
 
-        return super(OriginStreamApp, self).run()
+        return super(App, self).run()
 
 
 def main():
-    app = OriginStreamApp(len(sys.argv), sys.argv)
+    app = App(len(sys.argv), sys.argv)
     app()
 
 
