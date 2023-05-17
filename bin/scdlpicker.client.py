@@ -139,7 +139,7 @@ def gappy(waveforms, tolerance=0.5):
     for rec in waveforms:
         if prev:
             dt = float(rec.startTime() - prev.endTime())
-            if abs(dt)/rec.samplingFrequency() > tolerance:
+            if abs(dt)*rec.samplingFrequency() > tolerance:
                 gapCount += 1
         prev = rec
     return gapCount
