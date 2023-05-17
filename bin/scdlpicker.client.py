@@ -386,9 +386,7 @@ class App(seiscomp.client.Application):
             if seiscomp.datamodel.Pick.Find(pickID):
                 # FIXME HACK FIXME
                 continue
-            seiscomp.logging.debug("before Pick "+pickID)
             predictedPick = seiscomp.datamodel.Pick(pickID)
-            seiscomp.logging.debug("after Pick "+pickID)
             phase = seiscomp.datamodel.Phase()
             phase.setCode("P")
             predictedPick.setPhaseHint(phase)
@@ -541,6 +539,7 @@ class App(seiscomp.client.Application):
         seiscomp.logging.debug("Looking for gappy streams")
         gappyStreams = []
         for streamID in waveforms:
+            waveforms[streamID] = scdlpicker.util.prepare(waveforms[streamID])
             if gappy(waveforms[streamID], tolerance=1.):
                 gappyStreams.append(streamID)
         for streamID in gappyStreams:
@@ -698,9 +697,7 @@ class App(seiscomp.client.Application):
 
         # Query all associated picks for this origin
         associated_picks = []
-        seiscomp.logging.debug("before getPicks")
         objects = self.query().getPicks(originID)
-        seiscomp.logging.debug("after getPicks")
         if not objects:
             # FIXME: temp
             seiscomp.logging.debug("no results from getPicks")

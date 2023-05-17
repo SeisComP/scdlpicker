@@ -379,3 +379,24 @@ def configuredStreams(configModule, myName):
 
     return items
 
+
+def prepare(records):
+    """
+    Prepare waveforms for processing
+    - sort records in time
+    - remove duplicates
+    """
+    tp1 = tp2 = None
+    filtered = list()
+    # Assuming that all records are of the same stream, we compare start
+    # and end times as a proxy for "identical record". The probability for
+    # identical records is then high enough but we avoid headaches due to
+    # different sequence numbers, which have indeed been observed in the
+    # wild for otherwise identical records.
+    for rec in sorted(records, key=lambda r: r.startTime()):
+        if rec.startTime()==tp1 and rec.endTime()==tp2:
+            continue
+        filtered.append(rec)
+        tp1 = rec.startTime()
+        tp2 = rec.endTime()
+    return filtered
