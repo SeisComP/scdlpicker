@@ -26,8 +26,8 @@ import seiscomp.logging
 import seiscomp.math
 import seiscomp.seismology
 import scdlpicker.inventory
-import scdlpicker.util
-import scdlpicker.eventworkspace
+import scdlpicker.util as _util
+import scdlpicker.eventworkspace as _ews
 
 
 # Below are parameters that for the time being are hardcoded.
@@ -326,7 +326,7 @@ class App(seiscomp.client.Application):
         configModule = self.configModule()
         myName = self.name()
         self.configuredStreams = \
-            scdlpicker.util.configuredStreams(configModule, myName)
+            _util.configuredStreams(configModule, myName)
 
         return True
 
@@ -352,7 +352,7 @@ class App(seiscomp.client.Application):
         net_sta_blacklist = []
         for pickID in picks:
             pick = picks[pickID]
-            n, s, l, c = scdlpicker.util.nslc(pick)
+            n, s, l, c = _util.nslc(pick)
             net_sta_blacklist.append((n, s))
 
         predictedPicks = {}
@@ -400,7 +400,6 @@ class App(seiscomp.client.Application):
             predictedPick.setWaveformID(wfid)
             # We do not set the creation info here.
             if pickID not in predictedPicks:
-                seiscomp.logging.debug("predicted pick %s" % pickID)
                 predictedPicks[pickID] = predictedPick
         return predictedPicks
 
@@ -466,12 +465,10 @@ class App(seiscomp.client.Application):
                 loc = "--"
             cha = wfid.channelCode()
 
-            # Sometimes manual picks produced by scolv have only
-            # "BH" etc. as channel code. IIRC this is to accomodate
-            # 3-component picks where "BHZ" etc. would be misleading.
-            # But here it doesn't matter for the data request.
+            # Sometimes manual picks produced by scolv have only "BH" etc. as
+            # channel code. For the request that doesn't make a difference.
             if len(cha) == 2:
-                cha = cha+"Z"
+                cha = cha + "Z"
 
             # avoid requesting data that we have saved already
             eventID = event.publicID()
@@ -486,65 +483,61 @@ class App(seiscomp.client.Application):
             beforeP = afterP = 60.  # temporarily
             t1 = t0 + seiscomp.core.TimeSpan(-beforeP)
             t2 = t0 + seiscomp.core.TimeSpan(afterP)
+            if (net, sta, loc, cha[:2]) not in self.components:
+                # This may occur if a station was (1) blacklisted or (2) added
+                # to the processing later on. Either way we skip this pick.
+                continue
             datarequest.append((t1, t2, net, sta, loc, cha))
-            t1 = scdlpicker.util.isotimestamp(t1)
-            t2 = scdlpicker.util.isotimestamp(t2)
+            t1 = _util.isotimestamp(t1)
+            t2 = _util.isotimestamp(t2)
             seiscomp.logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
                                    % (net, sta, loc, cha, t1, t2))
 
         waveforms = dict()
 
-        if not datarequest:
-            self.acquisitionInProgress = False
-            return waveforms  # empty
+        if datarequest:
+            # request waveforms and dump them to one file per stream
+            seiscomp.logging.info("Opening RecordStrem "+self.recordStreamURL())
+            stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
+            stream.setTimeout(streamTimeout)
+            streamCount = 0
+            for t1, t2, net, sta, loc, cha in datarequest:
+                for c in self.components[(net, sta, loc, cha[:2])]:
+                    _loc = "" if loc == "--" else loc
+                    stream.addStream(net, sta, _loc, cha[:2] + c, t1, t2)
+                    streamCount += 1
 
-        # request waveforms and dump them to one file per stream
-        seiscomp.logging.info("Opening RecordStrem "+self.recordStreamURL())
-        stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
-        stream.setTimeout(streamTimeout)
-        streamCount = 0
-        for t1, t2, net, sta, loc, cha in datarequest:
-            try:
-                components = self.components[(net, sta, loc, cha[:2])]
-            except KeyError:
-                # This may occur if a station was (1) blacklisted or
-                # (2) added to the processing later on.
-                # Either way we skip this pick.
-                continue
-            for c in components:
-                _loc = "" if loc == "--" else loc
-                stream.addStream(net, sta, _loc, cha[:2] + c, t1, t2)
-                streamCount += 1
-        seiscomp.logging.info(
-            "RecordStream: requested %d streams" % streamCount)
-        count = 0
-        for rec in scdlpicker.util.RecordIterator(stream, showprogress=True):
-            if rec is None:
-                break
-            if not rec.streamID() in waveforms:
-                waveforms[rec.streamID()] = []
-            waveforms[rec.streamID()].append(rec)
-            count += 1
-        seiscomp.logging.debug(
-            "RecordStream: received  %d records" % (count,))
+            seiscomp.logging.info(
+                "RecordStream: requested %d streams" % streamCount)
+            count = 0
+            for rec in _util.RecordIterator(stream, showprogress=True):
+                if rec is None:
+                    break
+                streamID = rec.streamID()
+                if not streamID in waveforms:
+                    waveforms[streamID] = []
+                waveforms[streamID].append(rec)
+                count += 1
+            seiscomp.logging.debug(
+                "RecordStream: received  %d records" % (count,))
 
-        count = 0
-        for key in waveforms:
-            count += len(waveforms[key])
-        seiscomp.logging.debug(
-            "RecordStream: received  %d records for %d streams"
-            % (count, len(waveforms.keys())))
+            count = 0
+            for key in waveforms:
+                count += len(waveforms[key])
+            seiscomp.logging.debug(
+                "RecordStream: received  %d records for %d streams"
+                % (count, len(waveforms.keys())))
 
-        # remove gappy streams
-        seiscomp.logging.debug("Looking for gappy streams")
-        gappyStreams = []
-        for streamID in waveforms:
-            waveforms[streamID] = scdlpicker.util.prepare(waveforms[streamID])
-            if gappy(waveforms[streamID], tolerance=1.):
-                gappyStreams.append(streamID)
-        for streamID in gappyStreams:
-            seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
-            del waveforms[streamID]
+            # remove gappy streams
+            seiscomp.logging.debug("Looking for gappy streams")
+            gappyStreams = []
+            for streamID in waveforms:
+                waveforms[streamID] = _util.prepare(waveforms[streamID])
+                if gappy(waveforms[streamID], tolerance=1.):
+                    gappyStreams.append(streamID)
+            for streamID in gappyStreams:
+                seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
+# TEMP          del waveforms[streamID]
 
         self.acquisitionInProgress = False
         return waveforms
@@ -568,8 +561,7 @@ class App(seiscomp.client.Application):
 
         seiscomp.logging.debug("Loaded event "+eventID)
 
-        workspace = self.workspaces[eventID] = \
-            scdlpicker.eventworkspace.EventWorkspace()
+        workspace = self.workspaces[eventID] = _ews.EventWorkspace()
         workspace.event = event
         workspace.origin = None
         workspace.all_picks = dict()
@@ -595,7 +587,7 @@ class App(seiscomp.client.Application):
                 except AssertionError:
                     continue
 
-                if scdlpicker.util.manual(origin) and skipManualOrigins:
+                if _util.manual(origin) and skipManualOrigins:
                     seiscomp.logging.debug(
                         "Skipping manual origin " + origin.publicID())
                     continue
@@ -641,13 +633,13 @@ class App(seiscomp.client.Application):
     def addObject(self, parentID, obj):
         # called by the Application class if a new object is received
         event = seiscomp.datamodel.Event.Cast(obj)
-        if scdlpicker.util.valid(event):
+        if _util.valid(event):
             self.pendingEvents[event.publicID()] = event
 
     def updateObject(self, parentID, obj):
         # called by the Application class if an updated object is received
         event = seiscomp.datamodel.Event.Cast(obj)
-        if scdlpicker.util.valid(event):
+        if _util.valid(event):
             self.pendingEvents[event.publicID()] = event
 
     def cleanup(self, timeout=30*3600):
@@ -722,7 +714,7 @@ class App(seiscomp.client.Application):
 
             # We usually don't re-pick manual picks.
             # Perhaps add option to allow that.
-#           if scdlpicker.util.manual(pick):
+#           if _util.manual(pick):
 #               seiscomp.logging.debug("Skipping manual pick "+pickID)
 #               continue
 
@@ -836,7 +828,7 @@ class App(seiscomp.client.Application):
         streamIDs = dict()
         for streamID in workspace.waveforms:
             firstRecord = workspace.waveforms[streamID][0]
-            n, s, l, c = scdlpicker.util.nslc(firstRecord)
+            n, s, l, c = _util.nslc(firstRecord)
             if (n, s, l) not in streamIDs:
                 streamIDs[(n, s, l)] = []
             streamIDs[(n, s, l)].append(streamID)
@@ -858,8 +850,7 @@ class App(seiscomp.client.Application):
 
         # Register an EventWorkspace instance if needed
         if eventID not in self.workspaces:
-            self.workspaces[eventID] = \
-                scdlpicker.eventworkspace.EventWorkspace()
+            self.workspaces[eventID] = _ews.EventWorkspace()
         workspace = self.workspaces[eventID]
 
         # Load a more complete version of the event
