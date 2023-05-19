@@ -25,7 +25,7 @@ import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.math
 import seiscomp.seismology
-import scdlpicker.inventory
+import scdlpicker.inventory as _inventory
 import scdlpicker.util as _util
 import scdlpicker.eventworkspace as _ews
 
@@ -74,7 +74,7 @@ emptyOriginAgencyIDs = ["EMSC", "BGR", "NEIC", "BMKG"]
 tryUpickedStations = True
 
 # We need a more convenient config for that:
-netstaBlackList = [
+global_net_sta_blacklist = [
     # bad components
     ("WA", "ZON"),
 ]
@@ -338,6 +338,10 @@ class App(seiscomp.client.Application):
         for eventID in sorted(self.pendingEvents.keys()):
             event = self.pendingEvents.pop(eventID)
             self.processEvent(event)
+            # Poll for results between each event. It doesn't cost much
+            # and in case of aftershocks is really needed in order to
+            # avoid deadlocks.
+            self.pollRepickerResults()
 
     def findUnpickedStations(self, origin, maxDelta, picks):
         """
@@ -352,24 +356,24 @@ class App(seiscomp.client.Application):
         net_sta_blacklist = []
         for pickID in picks:
             pick = picks[pickID]
-            n, s, l, c = _util.nslc(pick)
-            net_sta_blacklist.append((n, s))
+            net, sta, loc, cha = _util.nslc(pick)
+            net_sta_blacklist.append((net, sta))
 
         predictedPicks = {}
 
         now = seiscomp.core.Time.GMT()
         inv = seiscomp.client.Inventory.Instance().inventory()
-        inv = scdlpicker.inventory.InventoryIterator(inv, now)
+        inv = _inventory.InventoryIterator(inv, now)
         for network, station, location, stream in inv:
-            n =  network.code()
-            s =  station.code()
-            l = location.code()
-            c =   stream.code()
-            c = c[:2]
-            # nslc = (n, s, l, c)
-            if (n, s) in net_sta_blacklist:
+            net =  network.code()
+            sta =  station.code()
+            loc = location.code()
+            cha =   stream.code()
+            cha = cha[:2]
+            # nslc = (net, sta, loc, cha)
+            if (net, sta) in net_sta_blacklist:
                 continue
-            if (n, s, "--" if l == "" else l, c) not in self.configuredStreams:
+            if (net, sta, "--" if loc == "" else loc, cha) not in self.configuredStreams:
                 continue
             slat = station.latitude()
             slon = station.longitude()
@@ -382,7 +386,7 @@ class App(seiscomp.client.Application):
             time = origin.time().value() + \
                 seiscomp.core.TimeSpan(firstArrival.time)
             timestamp = time.toString("%Y%m%d.%H%M%S.%f000000")[:18]
-            pickID = timestamp + "-PRE-%s.%s.%s.%s" % (n, s, l, c)
+            pickID = timestamp + "-PRE-%s.%s.%s.%s" % (net, sta, loc, cha)
             if seiscomp.datamodel.Pick.Find(pickID):
                 # FIXME HACK FIXME
                 continue
@@ -393,10 +397,10 @@ class App(seiscomp.client.Application):
             q = seiscomp.datamodel.TimeQuantity(time)
             predictedPick.setTime(q)
             wfid = seiscomp.datamodel.WaveformStreamID()
-            wfid.setNetworkCode(n)
-            wfid.setStationCode(s)
-            wfid.setLocationCode(l)
-            wfid.setChannelCode(c+"Z")
+            wfid.setNetworkCode(net)
+            wfid.setStationCode(sta)
+            wfid.setLocationCode(loc)
+            wfid.setChannelCode(cha+"Z")
             predictedPick.setWaveformID(wfid)
             # We do not set the creation info here.
             if pickID not in predictedPicks:
@@ -415,19 +419,19 @@ class App(seiscomp.client.Application):
 
         now = seiscomp.core.Time.GMT()
         inv = seiscomp.client.Inventory.Instance().inventory()
-        inv = scdlpicker.inventory.InventoryIterator(inv, now)
+        inv = _inventory.InventoryIterator(inv, now)
         for network, station, location, stream in inv:
-            n =  network.code()
-            s =  station.code()
-            if (n, s) in netstaBlackList:
+            net = network.code()
+            sta = station.code()
+            if (net, sta) in global_net_sta_blacklist:
                 continue
-            l = location.code()
-            c =   stream.code()
-            if l == "":
-                l = "--"
-            comp = c[2]
-            c = c[:2]
-            nslc = (n, s, l, c)
+            loc = location.code()
+            cha =   stream.code()
+            if loc == "":
+                loc = "--"
+            comp = cha[2]
+            cha = cha[:2]
+            nslc = (net, sta, loc, cha)
             if nslc not in self.components:
                 self.components[nslc] = []
             self.components[nslc].append(comp)
@@ -454,7 +458,7 @@ class App(seiscomp.client.Application):
 
         self.acquisitionInProgress = True
 
-        datarequest = list()
+        request = list()
         for pickID in picks:
             pick = picks[pickID]
             wfid = pick.waveformID()
@@ -487,7 +491,7 @@ class App(seiscomp.client.Application):
                 # This may occur if a station was (1) blacklisted or (2) added
                 # to the processing later on. Either way we skip this pick.
                 continue
-            datarequest.append((t1, t2, net, sta, loc, cha))
+            request.append((t1, t2, net, sta, loc, cha))
             t1 = _util.isotimestamp(t1)
             t2 = _util.isotimestamp(t2)
             seiscomp.logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
@@ -495,16 +499,16 @@ class App(seiscomp.client.Application):
 
         waveforms = dict()
 
-        if datarequest:
+        if request:
             # request waveforms and dump them to one file per stream
             seiscomp.logging.info("Opening RecordStrem "+self.recordStreamURL())
             stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
             stream.setTimeout(streamTimeout)
             streamCount = 0
-            for t1, t2, net, sta, loc, cha in datarequest:
-                for c in self.components[(net, sta, loc, cha[:2])]:
+            for t1, t2, net, sta, loc, cha in request:
+                for comp in self.components[(net, sta, loc, cha[:2])]:
                     _loc = "" if loc == "--" else loc
-                    stream.addStream(net, sta, _loc, cha[:2] + c, t1, t2)
+                    stream.addStream(net, sta, _loc, cha[:2]+comp, t1, t2)
                     streamCount += 1
 
             seiscomp.logging.info(
@@ -828,10 +832,10 @@ class App(seiscomp.client.Application):
         streamIDs = dict()
         for streamID in workspace.waveforms:
             firstRecord = workspace.waveforms[streamID][0]
-            n, s, l, c = _util.nslc(firstRecord)
-            if (n, s, l) not in streamIDs:
-                streamIDs[(n, s, l)] = []
-            streamIDs[(n, s, l)].append(streamID)
+            net, sta, loc, cha = _util.nslc(firstRecord)
+            if (net, sta, loc) not in streamIDs:
+                streamIDs[(net, sta, loc)] = []
+            streamIDs[(net, sta, loc)].append(streamID)
 
         # for each complete NSL stream there should be 3 streamID's
         for nsl in streamIDs:
@@ -900,17 +904,17 @@ class App(seiscomp.client.Application):
                 tq = seiscomp.datamodel.TimeQuantity()
                 tq.setValue(time)
                 pick.setTime(tq)
-                n = p["networkCode"]
-                s = p["stationCode"]
-                l = p["locationCode"]
-                c = p["channelCode"]
-                if len(c) == 2:
-                    c += "Z"
+                net = p["networkCode"]
+                sta = p["stationCode"]
+                loc = p["locationCode"]
+                cha = p["channelCode"]
+                if len(cha) == 2:
+                    cha += "Z"
                 wfid = seiscomp.datamodel.WaveformStreamID()
-                wfid.setNetworkCode(n)
-                wfid.setStationCode(s)
-                wfid.setLocationCode("" if l == "--" else l)
-                wfid.setChannelCode(c)
+                wfid.setNetworkCode(net)
+                wfid.setStationCode(sta)
+                wfid.setLocationCode("" if loc == "--" else loc)
+                wfid.setChannelCode(cha)
                 pick.setWaveformID(wfid)
 
                 comments = []
