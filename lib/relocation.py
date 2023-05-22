@@ -105,7 +105,7 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             scdlpicker.util.dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
                 % (eventID, timestamp))
             seiscomp.logging.error("Giving up")
-            relocated = origin
+            relocated = None
             break
 
         if fixedDepth is None and \
@@ -130,6 +130,9 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
         origin = relocated
 
     if not relocated:
+        return
+
+    if relocated.arrivalCount() == 0:
         return
 
     if scdlpicker.util.uncertainty(relocated.depth()):
