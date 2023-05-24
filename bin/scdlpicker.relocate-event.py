@@ -127,7 +127,12 @@ class RelocatorApp(seiscomp.client.Application):
         relocated = scdlpicker.relocation.relocate(
             origin, eventID, self.fixedDepth, self.minimumDepth, self.maxResidual)
 
-        ci = scdlpicker.util.creationInfo(self.author, self.agencyID)
+        if not relocated:
+            seiscomp.logging.info("No relocation result for event "+eventID)
+            return
+
+        now = seiscomp.core.Time.GMT()
+        ci = scdlpicker.util.creationInfo(self.author, self.agencyID, now)
         relocated.setCreationInfo(ci)
         relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 

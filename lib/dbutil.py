@@ -20,7 +20,7 @@ import seiscomp.datamodel
 import seiscomp.logging
 import scdlpicker.util
 
-def loadEvent(query, evid):
+def loadEvent(query, eventID):
     """
     Retrieve event from DB incl. children
    
@@ -29,7 +29,7 @@ def loadEvent(query, evid):
 
     Uses loadObject() to also load the children.
     """
-    event = query.loadObject(seiscomp.datamodel.Event.TypeInfo(), evid)
+    event = query.loadObject(seiscomp.datamodel.Event.TypeInfo(), eventID)
     event = seiscomp.datamodel.Event.Cast(event)
     if event:
         if event.eventDescriptionCount() == 0:

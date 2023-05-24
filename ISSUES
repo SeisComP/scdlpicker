@@ -1,3 +1,5 @@
+# Wrong initial source depth
+
 If the initial source depth is very wrong, e.g. 500 km vs. 10 km,
 then two problems arise:
 
@@ -13,3 +15,10 @@ Test-Event e.g. gfz2022fpfe.
 
 Solution: The client needs to update the predicted arrival time for
 each and every origin.
+
+
+# Too many stations processed at once
+
+Processing of too many stations can slow down processing because of the SeedLink acquisition that waits until all time windows are filled.
+
+Possible solution: Frequently pass intermediate datasets to the picker. E.g. every minute dump all currently complete streams and initiate the picking.

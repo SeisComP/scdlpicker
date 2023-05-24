@@ -172,7 +172,6 @@ class App(seiscomp.client.Application):
         # self.setRecordInputHint(seiscomp.core.Record.SAVE_RAW)
 
         self.workspaces = dict()
-        self.acquisitionInProgress = False
 
         # Keep track of events that need to be processed. We process
         # one event at a time. In this dict we register the events
@@ -320,8 +319,13 @@ class App(seiscomp.client.Application):
         if not super(App, self).init():
             return False
 
+        self.inventory = seiscomp.client.Inventory.Instance().inventory()
+
         self.setupFolders()
-        self.setupComponents()
+        now = seiscomp.core.Time.GMT()
+        self.components = _inventory.streamComponents(
+                self.inventory, now,
+                net_sta_blacklist=global_net_sta_blacklist)
 
         configModule = self.configModule()
         myName = self.name()
@@ -331,7 +335,13 @@ class App(seiscomp.client.Application):
         return True
 
     def handleTimeout(self):
-        self.pollRepickerResults()
+        repickerResults = _util.pollRepickerResults(self.outgoingDir)
+        if repickerResults:
+            for yamlfile in repickerResults:
+                if _util.sendRepickerResults(yamlfile, self.connection()):
+                    d, f = os.path.split(yamlfile)
+                    sent = os.path.join(self.sentDir, f)
+                    os.rename(yamlfilen, sent)
         self.processPendingEvents()
 
     def processPendingEvents(self):
@@ -341,7 +351,13 @@ class App(seiscomp.client.Application):
             # Poll for results between each event. It doesn't cost much
             # and in case of aftershocks is really needed in order to
             # avoid deadlocks.
-            self.pollRepickerResults()
+            repickerResults = _util.pollRepickerResults(self.outgoingDir)
+            if repickerResults:
+                for yamlfile in repickerResults:
+                    if _util.sendRepickerResults(yamlfile, self.connection()):
+                        d, f = os.path.split(yamlfile)
+                        sent = os.path.join(self.sentDir, f)
+                        os.rename(yamlfile, sent)
 
     def findUnpickedStations(self, origin, maxDelta, picks):
         """
@@ -413,28 +429,6 @@ class App(seiscomp.client.Application):
                   self.outgoingDir, self.sentDir]:
             os.makedirs(d, exist_ok=True)
 
-    def setupComponents(self):
-        # dict with n,s,l,c[:2] as key, and list of c[2]'s as values
-        self.components = dict()
-
-        now = seiscomp.core.Time.GMT()
-        inv = seiscomp.client.Inventory.Instance().inventory()
-        inv = _inventory.InventoryIterator(inv, now)
-        for network, station, location, stream in inv:
-            net = network.code()
-            sta = station.code()
-            if (net, sta) in global_net_sta_blacklist:
-                continue
-            loc = location.code()
-            cha =   stream.code()
-            if loc == "":
-                loc = "--"
-            comp = cha[2]
-            cha = cha[:2]
-            nslc = (net, sta, loc, cha)
-            if nslc not in self.components:
-                self.components[nslc] = []
-            self.components[nslc].append(comp)
 
     def _loadEvent(self, publicID):
         # load a bare Event object from database
@@ -455,8 +449,6 @@ class App(seiscomp.client.Application):
         return obj
 
     def _loadWaveformsForPicks(self, picks, event):
-
-        self.acquisitionInProgress = True
 
         request = list()
         for pickID in picks:
@@ -543,7 +535,6 @@ class App(seiscomp.client.Application):
                 seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
 # TEMP          del waveforms[streamID]
 
-        self.acquisitionInProgress = False
         return waveforms
 
     def testEvent(self, eventID,
@@ -870,129 +861,6 @@ class App(seiscomp.client.Application):
         self.processOrigin(origin, event)
         self.cleanup()
 
-    def _creationInfo(self):
-        ci = seiscomp.datamodel.CreationInfo()
-        ci.setAuthor(author)
-        ci.setAgencyID(agency)
-        ci.setCreationTime(seiscomp.core.Time.GMT())
-        return ci
-
-    def readResults(self, path):
-        """
-        Read repicking results from the specified YAML file.
-        """
-
-        picks = {}
-        confs = {}
-        comms = {}
-        with open(path) as yf:
-            ci = self._creationInfo()
-
-            # Note that the repicker module may have produced more
-            # than one repick per original pick. We pick the one
-            # with the larger confidence value. Later on we may also
-            # use the other picks e.g. as depth phases. Currently we
-            # don't do that but it's a TODO item.
-
-            for p in yaml.safe_load(yf):
-                pickID = p["publicID"]
-                if seiscomp.datamodel.Pick.Find(pickID):
-                    # FIXME HACK FIXME
-                    seiscomp.logging.debug("FIXME: "+pickID)
-                pick = seiscomp.datamodel.Pick(pickID)
-                time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
-                tq = seiscomp.datamodel.TimeQuantity()
-                tq.setValue(time)
-                pick.setTime(tq)
-                net = p["networkCode"]
-                sta = p["stationCode"]
-                loc = p["locationCode"]
-                cha = p["channelCode"]
-                if len(cha) == 2:
-                    cha += "Z"
-                wfid = seiscomp.datamodel.WaveformStreamID()
-                wfid.setNetworkCode(net)
-                wfid.setStationCode(sta)
-                wfid.setLocationCode("" if loc == "--" else loc)
-                wfid.setChannelCode(cha)
-                pick.setWaveformID(wfid)
-
-                comments = []
-
-                comment = seiscomp.datamodel.Comment()
-                comment.setText(p["model"])
-                comment.setId("dlmodel")
-                comments.append(comment)
-
-                conf = float(p["confidence"])
-
-                comment = seiscomp.datamodel.Comment()
-                comment.setText("%.3f" % p["confidence"])
-                comment.setId("confidence")
-                comments.append(comment)
-
-                if pickID in picks:
-                    # only override existing pick with higher
-                    # confidence pick
-                    if conf <= confs[pickID]:
-                        continue
-                picks[pickID] = pick
-                confs[pickID] = conf
-                comms[pickID] = comments
-
-            for pickID in picks:
-                pick = picks[pickID]
-                pick.setCreationInfo(ci)
-                pick.setMethodID("DL")
-                phase = seiscomp.datamodel.Phase()
-                phase.setCode("P")
-                pick.setPhaseHint(phase)
-                pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
-
-        return picks, comms
-
-    def pollRepickerResults(self):
-        """
-        Check if the repicker module has produced new results.
-
-        If so, we read them and send them via the messaging.
-        """
-
-        todolist = list()
-
-        for item in os.listdir(self.outgoingDir):
-            if not item.endswith(".yaml"):
-                continue
-            path = os.path.join(self.outgoingDir, item)
-            todolist.append(path)
-
-        for path in sorted(todolist):
-            seiscomp.logging.info("pollRepickerResults: working on "+path)
-
-            ep = seiscomp.datamodel.EventParameters()
-            picks, comments = self.readResults(path)
-            seiscomp.datamodel.Notifier.Enable()
-            for pickID in picks:
-                pick = picks[pickID]
-                # It is essential to first add the pick to the
-                # EventParameters and then the comments to the pick.
-                # This is why self.readResults returns picks and
-                # comments separately.
-                ep.add(pick)
-                if pickID in comments:
-                    for comment in comments[pickID]:
-                        pick.add(comment)
-            msg = seiscomp.datamodel.Notifier.GetMessage()
-            seiscomp.datamodel.Notifier.Disable()
-            if self.connection().send(msg):
-                for pickID in picks:
-                    seiscomp.logging.info("sent "+pickID)
-            else:
-                for pickID in picks:
-                    seiscomp.logging.info("failed to send "+pickID)
-            d, f = os.path.split(path)
-            sent = os.path.join(self.sentDir, f)
-            os.rename(path, sent)
 
     def run(self):
         self.dumpConfiguration()

@@ -24,7 +24,6 @@ import math
 import sys
 
 
-
 def arrivalCount(org, minArrivalWeight=0.5):
     count = 0
     for i in range(org.arrivalCount()):
@@ -400,3 +399,140 @@ def prepare(records):
         tp1 = rec.startTime()
         tp2 = rec.endTime()
     return filtered
+
+
+def creationInfo(author, agency, creationTime):
+    ci = seiscomp.datamodel.CreationInfo()
+    ci.setAuthor(author)
+    ci.setAgencyID(agency)
+    ci.setCreationTime(creationTime)
+    return ci
+
+
+    def pollRepickerResults(self, resultsDir):
+        """
+        Check if the repicker module has produced new results.
+
+        If so, we read them and send them via the messaging.
+        """
+
+        yamlfilenames = list()
+
+        for item in os.listdir(resultsDir):
+            if not item.endswith(".yaml"):
+                continue
+            yamlfilename = os.path.join(resultsDir, item)
+            yamlfilenames.append(yamlfilename)
+
+        return yamlfilenames
+
+
+def readRepickerResults(self, path):
+    """
+    Read repicking results from the specified YAML file.
+    """
+
+    now = seiscomp.core.Time.GMT()
+
+    picks = {}
+    confs = {}
+    comms = {}
+    with open(path) as yamlfile:
+        ctime = now
+        ci = creationInfo(author, agency, ctime)
+
+        # Note that the repicker module may have produced more
+        # than one repick per original pick. We pick the one
+        # with the larger confidence value. Later on we may also
+        # use the other picks e.g. as depth phases. Currently we
+        # don't do that but it's a TODO item.
+
+        for p in yaml.safe_load(yamlfile):
+            pickID = p["publicID"]
+            if seiscomp.datamodel.Pick.Find(pickID):
+                # FIXME HACK FIXME
+                seiscomp.logging.debug("FIXME: "+pickID)
+            pick = seiscomp.datamodel.Pick(pickID)
+            time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
+            tq = seiscomp.datamodel.TimeQuantity()
+            tq.setValue(time)
+            pick.setTime(tq)
+            net = p["networkCode"]
+            sta = p["stationCode"]
+            loc = p["locationCode"]
+            cha = p["channelCode"]
+            if len(cha) == 2:
+                cha += "Z"
+            wfid = seiscomp.datamodel.WaveformStreamID()
+            wfid.setNetworkCode(net)
+            wfid.setStationCode(sta)
+            wfid.setLocationCode("" if loc == "--" else loc)
+            wfid.setChannelCode(cha)
+            pick.setWaveformID(wfid)
+
+            comments = []
+
+            comment = seiscomp.datamodel.Comment()
+            comment.setText(p["model"])
+            comment.setId("dlmodel")
+            comments.append(comment)
+
+            conf = float(p["confidence"])
+
+            comment = seiscomp.datamodel.Comment()
+            comment.setText("%.3f" % p["confidence"])
+            comment.setId("confidence")
+            comments.append(comment)
+
+            if pickID in picks:
+                # only override existing pick with higher
+                # confidence pick
+                if conf <= confs[pickID]:
+                    continue
+            picks[pickID] = pick
+            confs[pickID] = conf
+            comms[pickID] = comments
+
+        for pickID in picks:
+            pick = picks[pickID]
+            pick.setCreationInfo(ci)
+            pick.setMethodID("DL")
+            phase = seiscomp.datamodel.Phase()
+            phase.setCode("P")
+            pick.setPhaseHint(phase)
+            pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
+
+    return picks, comms
+
+
+def sendRepickerResults(self, yamlfilename, connection):
+    """
+    Send the repicker results contained in one YAML file.
+
+    The YAML file is assumed to be non empty.
+    """
+    seiscomp.logging.info("sendRepickerResults: working on "+yamlfilename)
+
+    ep = seiscomp.datamodel.EventParameters()
+    picks, comments = _util.readRepickerResults(yamlfilename)
+    seiscomp.datamodel.Notifier.Enable()
+    for pickID in picks:
+        pick = picks[pickID]
+        # It is essential to first add the pick to the
+        # EventParameters and then the comments to the pick.
+        # This is why _util.readRepickerResults returns picks and
+        # comments separately.
+        ep.add(pick)
+        if pickID in comments:
+            for comment in comments[pickID]:
+                pick.add(comment)
+    msg = seiscomp.datamodel.Notifier.GetMessage()
+    seiscomp.datamodel.Notifier.Disable()
+    if connection.send(msg):
+        for pickID in picks:
+            seiscomp.logging.info("sent "+pickID)
+        return True
+    else:
+        for pickID in picks:
+            seiscomp.logging.info("failed to send "+pickID)
+        return False

@@ -453,7 +453,7 @@ class Repicker:
 
         return True
 
-    def fill_result(self, predictions, stream, collected_picks, annot_d):
+    def fill_result(self, predictions, stream, collected_picks, annot_d, eventID):
         """Fills `predictions` with annotations done by the model
            using the stream. Additional data will be taken from
            `collected_picks`.
@@ -482,7 +482,8 @@ class Repicker:
                         collected_picks))
                 except StopIteration:
                     logger.warning(
-                        "failed to associate annotation for %s.%s" % (
+                        "%s: failed to associate annotation for %s.%s" % (
+                            eventID,
                             annotation.meta.network,
                             annotation.meta.station))
 
@@ -518,7 +519,7 @@ class Repicker:
                 collected_picks.remove(pick)
 
         except (TypeError, ValueError, ZeroDivisionError) as e:
-            logger.error("Caught "+repr(e))
+            logger.error(eventID+": caught "+repr(e))
 
         if None not in [annotations, assoc_ind]:
             # Clean annotations from those who were associated successfully
@@ -564,7 +565,9 @@ class Repicker:
             try:
                 stream, collected_picks = \
                     self._get_stream_from_picks(picks_batch, eventID)
-            except Exception:
+            except Exception as e:
+                etxt = str(e)
+                logger.debug(f"{eventID}: caught unknown exception: {etxt}")
                 stream = None
 
             if stream is not None:
@@ -573,7 +576,7 @@ class Repicker:
                 # next batch could be ok, therefore we just need to pass
                 # the following line
                 self.fill_result(
-                    acc_predictions, stream, collected_picks, annot_d)
+                    acc_predictions, stream, collected_picks, annot_d, eventID)
 
             # Prepare for next batch
             picks_remain_size -= self.batch_size

@@ -34,16 +34,16 @@ import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.math
 import seiscomp.seismology
-import scdlpicker.dbutil
-import scdlpicker.util
-import scdlpicker.inventory
-import scdlpicker.relocation
-import scdlpicker.defaults
+import scdlpicker.dbutil as _dbutil
+import scdlpicker.util as _util
+import scdlpicker.inventory as _inventory
+import scdlpicker.relocation as _relocation
+import scdlpicker.defaults as _defaults
 
 
 def quality(origin):
     # similar role of origin score in scautoloc
-    return scdlpicker.util.arrivalCount(origin)  # to be improved
+    return _util.arrivalCount(origin)  # to be improved
 
 
 class RelocatorApp(seiscomp.client.Application):
@@ -57,10 +57,10 @@ class RelocatorApp(seiscomp.client.Application):
         self.addMessagingSubscription("LOCATION")
         self.addMessagingSubscription("EVENT")
 
-        self.minimumDepth = scdlpicker.defaults.minimumDepth
-        self.maxResidual = scdlpicker.defaults.maxResidual
+        self.minimumDepth = _defaults.minimumDepth
+        self.maxResidual = _defaults.maxResidual
 
-        self.allowedAuthorIDs = scdlpicker.defaults.allowedAuthorIDs
+        self.allowedAuthorIDs = _defaults.allowedAuthorIDs
 
         # Keep track of changes of the preferred origin of each event
         self.preferredOrigins = dict()
@@ -113,19 +113,37 @@ class RelocatorApp(seiscomp.client.Application):
         self.kickOffProcessing()
 
     def addObject(self, parentID, obj):
-        # save new object received via messaging
+        # Save new object received via messaging. The actual processing is
+        # started from handleTimeout().
         self.save(obj)
 
     def updateObject(self, parentID, obj):
-        # save updated object received via messaging
+        # Save new object received via messaging. The actual processing is
+        # started from handleTimeout().
         self.save(obj)
+
+    def save(self, obj):
+        # Save object for later processing in handleTimeout()
+        evt = seiscomp.datamodel.Event.Cast(obj)
+        if evt:
+            seiscomp.logging.debug("Saving "+evt.publicID())
+            if _util.valid(evt):
+                self.pendingEvents[evt.publicID()] = evt
+            return evt
+        org = seiscomp.datamodel.Origin.Cast(obj)
+        if org:
+            seiscomp.logging.debug("Saving "+org.publicID())
+            self.origins[org.publicID()] = org
+            return org
 
     def kickOffProcessing(self):
         # Check for each pending event if it is due to be processed
         for eventID in sorted(self.pendingEvents.keys()):
+#           seiscomp.logging.debug("kickOffProcessing begin " + eventID)
             if self.readyToProcess(eventID):
                 self.pendingEvents.pop(eventID)
                 self.processEvent(eventID)
+#           seiscomp.logging.debug("kickOffProcessing   end " + eventID)
 
     def readyToProcess(self, eventID, minDelay=1080):
         if eventID not in self.pendingEvents:
@@ -135,7 +153,7 @@ class RelocatorApp(seiscomp.client.Application):
         preferredOriginID = evt.preferredOriginID()
         if preferredOriginID not in self.origins:
             seiscomp.logging.debug("Loading origin "+preferredOriginID)
-            org = scdlpicker.dbutil.loadOriginWithoutArrivals(
+            org = _dbutil.loadOriginWithoutArrivals(
                 self.query(), preferredOriginID)
             if not org:
                 return False
@@ -161,7 +179,7 @@ class RelocatorApp(seiscomp.client.Application):
             del self.pendingEvents[eventID]
             return False
 
-        if not scdlpicker.util.qualified(org):
+        if not _util.qualified(org):
             seiscomp.logging.debug(
                 "Unqualified origin "+preferredOriginID+" rejected")
             del self.pendingEvents[eventID]
@@ -241,43 +259,20 @@ class RelocatorApp(seiscomp.client.Application):
 
         return q > 1
 
-    def save(self, obj):
-        evt = seiscomp.datamodel.Event.Cast(obj)
-        if evt:
-            seiscomp.logging.debug(evt.publicID())
-            if scdlpicker.util.valid(evt):
-                self.pendingEvents[evt.publicID()] = evt
-            return
-        org = seiscomp.datamodel.Origin.Cast(obj)
-        if org:
-            seiscomp.logging.debug(org.publicID())
-            self.origins[org.publicID()] = org
-            return
-
     def processEvent(self, eventID):
-        seiscomp.logging.info("Working on event " + eventID)
-
-        connected = self.database().isConnected()
-        seiscomp.logging.debug(
-            "Database connected " + ("yes" if connected else "no"))
-#       if connected:
-#           self.database().disconnect()
-#           seiscomp.logging.debug("reconnecting")
-#           self.database().connect(self.databaseURI())
-
-        event = scdlpicker.dbutil.loadEvent(self.query(), eventID)
+        event = _dbutil.loadEvent(self.query(), eventID)
         if not event:
             seiscomp.logging.warning("Failed to load event " + eventID)
             return
 
         seiscomp.logging.debug("Loaded event "+eventID)
-        origin = scdlpicker.dbutil.loadOriginWithoutArrivals(
+        origin = _dbutil.loadOriginWithoutArrivals(
             self.query(), event.preferredOriginID())
         seiscomp.logging.debug("Loaded origin " + origin.publicID())
 
         # adopt fixed depth according to incoming origin
         defaultDepth = 10.  # FIXME: no fixed 10 km here
-        if scdlpicker.util.hasFixedDepth(origin) \
+        if _util.hasFixedDepth(origin) \
                 and origin.depth().value() == defaultDepth:
             # fixed = True
             fixedDepth = origin.depth().value()
@@ -289,24 +284,28 @@ class RelocatorApp(seiscomp.client.Application):
 
         # Load all picks for a matching time span, independent of association.
         originWithArrivals, picks = \
-            scdlpicker.dbutil.loadPicksForOrigin(
+            _dbutil.loadPicksForOrigin(
                 origin, self.inventory, self.allowedAuthorIDs, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
-        relocated = scdlpicker.relocation.relocate(
+        relocated = _relocation.relocate(
             originWithArrivals, eventID, fixedDepth,
             self.minimumDepth, self.maxResidual)
         if not relocated:
             seiscomp.logging.warning("%s: relocation failed" % eventID)
             return
+        if relocated.arrivalCount() < 5:
+            seiscomp.logging.info("%s: too few arrivals" % eventID)
+            return
 
-        ci = scdlpicker.util.creationInfo(self.author, self.agencyID)
+        now = seiscomp.core.Time.GMT()
+        ci = _util.creationInfo(self.author, self.agencyID, now)
         relocated.setCreationInfo(ci)
         relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
         self.origins[relocated.publicID()] = relocated
 
-        scdlpicker.util.summarize(relocated)
+        _util.summarize(relocated)
         if eventID in self.relocated:
             # if quality(relocated) <= quality(self.relocated[eventID]):
             if not self.improvement(self.relocated[eventID], relocated):
@@ -354,12 +353,12 @@ class RelocatorApp(seiscomp.client.Application):
         try:
             self.maxResidual = self.commandline().optionDouble("max-residual")
         except RuntimeError:
-            self.maxResidual = scdlpicker.defaults.maxResidual
+            self.maxResidual = _defaults.maxResidual
 
         try:
             self.maxRMS = self.commandline().optionDouble("max-rms")
         except RuntimeError:
-            self.maxRMS = scdlpicker.defaults.maxRMS
+            self.maxRMS = _defaults.maxRMS
 
         try:
             eventIDs = self.commandline().optionString("event").split()
