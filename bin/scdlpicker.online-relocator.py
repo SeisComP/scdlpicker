@@ -76,6 +76,10 @@ class RelocatorApp(seiscomp.client.Application):
         # latest relocated origin per event
         self.relocated = dict()
 
+        now = seiscomp.core.Time.GMT()
+        self._previousPingDB = now
+
+
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
 
@@ -109,7 +113,18 @@ class RelocatorApp(seiscomp.client.Application):
 
         return True
 
+    def pingDB(self):
+        """
+        Keep the DB connection alive by making a dummy request every minute
+        """
+        now = seiscomp.core.Time.GMT()
+        if float(now - self._previousPingDB) > 60:
+            self.query().getObject(
+                seiscomp.datamodel.Event.TypeInfo(), "dummy")
+            self._previousPingDB = now
+
     def handleTimeout(self):
+        self.pingDB()
         self.kickOffProcessing()
 
     def addObject(self, parentID, obj):
