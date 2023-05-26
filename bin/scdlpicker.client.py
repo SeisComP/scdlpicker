@@ -334,14 +334,58 @@ class App(seiscomp.client.Application):
 
         return True
 
+
+    def sendRepickerResults(self, picks, comments):
+        """
+        Send the repicker results contained in one YAML file.
+
+        The YAML file is assumed to be non empty.
+        """
+
+        connection = self.connection()
+
+        # Use the same creationInfo for all new picks
+        now = seiscomp.core.Time.GMT()
+        ctime = now
+        ci = _util.creationInfo(author, agency, ctime)
+        for pickID in picks:
+            pick = picks[pickID]
+            pick.setCreationInfo(ci)
+
+        ep = seiscomp.datamodel.EventParameters()
+        seiscomp.datamodel.Notifier.Enable()
+        for pickID in picks:
+            pick = picks[pickID]
+            # It is essential to first add the pick to the
+            # EventParameters and then the comments to the pick.
+            # This is why readRepickerResults returns picks and
+            # comments separately.
+            ep.add(pick)
+            if pickID in comments:
+                for comment in comments[pickID]:
+                    pick.add(comment)
+        msg = seiscomp.datamodel.Notifier.GetMessage()
+        seiscomp.datamodel.Notifier.Disable()
+        if connection.send(msg):
+            for pickID in picks:
+                seiscomp.logging.info("sent "+pickID)
+            return True
+        else:
+            for pickID in picks:
+                seiscomp.logging.info("failed to send "+pickID)
+            return False
+
+
     def handleTimeout(self):
         repickerResults = _util.pollRepickerResults(self.outgoingDir)
         if repickerResults:
             for yamlfile in repickerResults:
-                if _util.sendRepickerResults(yamlfile, self.connection()):
+                picks, comments = _util.readRepickerResults(yamlfile)
+                if self.sendRepickerResults(picks, comments):
                     d, f = os.path.split(yamlfile)
                     sent = os.path.join(self.sentDir, f)
-                    os.rename(yamlfilen, sent)
+                    os.rename(yamlfile, sent)
+
         self.processPendingEvents()
 
     def processPendingEvents(self):
@@ -354,7 +398,8 @@ class App(seiscomp.client.Application):
             repickerResults = _util.pollRepickerResults(self.outgoingDir)
             if repickerResults:
                 for yamlfile in repickerResults:
-                    if _util.sendRepickerResults(yamlfile, self.connection()):
+                    picks, comments = _util.readRepickerResults(yamlfile)
+                    if self.sendRepickerResults(picks, comments):
                         d, f = os.path.split(yamlfile)
                         sent = os.path.join(self.sentDir, f)
                         os.rename(yamlfile, sent)

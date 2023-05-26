@@ -109,7 +109,7 @@ def streamComponents(inventory, time, net_sta_blacklist=None):
 
     components = dict()
 
-    inv = _inventory.InventoryIterator(inventory, time)
+    inv = InventoryIterator(inventory, time)
     for network, station, location, stream in inv:
         net = network.code()
         sta = station.code()

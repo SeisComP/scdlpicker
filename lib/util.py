@@ -16,12 +16,14 @@
 ###########################################################################
 
 
+import os
+import sys
+import math
+import yaml
 import seiscomp.core
 import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.io
-import math
-import sys
 
 
 def arrivalCount(org, minArrivalWeight=0.5):
@@ -409,38 +411,33 @@ def creationInfo(author, agency, creationTime):
     return ci
 
 
-    def pollRepickerResults(self, resultsDir):
-        """
-        Check if the repicker module has produced new results.
+def pollRepickerResults(resultsDir):
+    """
+    Check if the repicker module has produced new results.
 
-        If so, we read them and send them via the messaging.
-        """
+    If so, we read them and send them via the messaging.
+    """
 
-        yamlfilenames = list()
+    yamlfilenames = list()
 
-        for item in os.listdir(resultsDir):
-            if not item.endswith(".yaml"):
-                continue
-            yamlfilename = os.path.join(resultsDir, item)
-            yamlfilenames.append(yamlfilename)
+    for item in os.listdir(resultsDir):
+        if not item.endswith(".yaml"):
+            continue
+        yamlfilename = os.path.join(resultsDir, item)
+        yamlfilenames.append(yamlfilename)
 
-        return yamlfilenames
+    return yamlfilenames
 
 
-def readRepickerResults(self, path):
+def readRepickerResults(path):
     """
     Read repicking results from the specified YAML file.
     """
-
-    now = seiscomp.core.Time.GMT()
 
     picks = {}
     confs = {}
     comms = {}
     with open(path) as yamlfile:
-        ctime = now
-        ci = creationInfo(author, agency, ctime)
-
         # Note that the repicker module may have produced more
         # than one repick per original pick. We pick the one
         # with the larger confidence value. Later on we may also
@@ -495,7 +492,6 @@ def readRepickerResults(self, path):
 
         for pickID in picks:
             pick = picks[pickID]
-            pick.setCreationInfo(ci)
             pick.setMethodID("DL")
             phase = seiscomp.datamodel.Phase()
             phase.setCode("P")
@@ -503,36 +499,3 @@ def readRepickerResults(self, path):
             pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 
     return picks, comms
-
-
-def sendRepickerResults(self, yamlfilename, connection):
-    """
-    Send the repicker results contained in one YAML file.
-
-    The YAML file is assumed to be non empty.
-    """
-    seiscomp.logging.info("sendRepickerResults: working on "+yamlfilename)
-
-    ep = seiscomp.datamodel.EventParameters()
-    picks, comments = _util.readRepickerResults(yamlfilename)
-    seiscomp.datamodel.Notifier.Enable()
-    for pickID in picks:
-        pick = picks[pickID]
-        # It is essential to first add the pick to the
-        # EventParameters and then the comments to the pick.
-        # This is why _util.readRepickerResults returns picks and
-        # comments separately.
-        ep.add(pick)
-        if pickID in comments:
-            for comment in comments[pickID]:
-                pick.add(comment)
-    msg = seiscomp.datamodel.Notifier.GetMessage()
-    seiscomp.datamodel.Notifier.Disable()
-    if connection.send(msg):
-        for pickID in picks:
-            seiscomp.logging.info("sent "+pickID)
-        return True
-    else:
-        for pickID in picks:
-            seiscomp.logging.info("failed to send "+pickID)
-        return False

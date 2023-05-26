@@ -124,7 +124,7 @@ class RelocatorApp(seiscomp.client.Application):
             self._previousPingDB = now
 
     def handleTimeout(self):
-        self.pingDB()
+#       self.pingDB()
         self.kickOffProcessing()
 
     def addObject(self, parentID, obj):
