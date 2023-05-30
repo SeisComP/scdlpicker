@@ -17,6 +17,7 @@
 
 import sys
 import os
+import time
 import yaml
 import numpy
 import seiscomp.core
@@ -27,6 +28,7 @@ import seiscomp.math
 import seiscomp.seismology
 import scdlpicker.inventory as _inventory
 import scdlpicker.util as _util
+import scdlpicker.dbutil as _dbutil
 import scdlpicker.eventworkspace as _ews
 
 
@@ -334,7 +336,6 @@ class App(seiscomp.client.Application):
 
         return True
 
-
     def sendRepickerResults(self, picks, comments):
         """
         Send the repicker results contained in one YAML file.
@@ -374,7 +375,6 @@ class App(seiscomp.client.Application):
             for pickID in picks:
                 seiscomp.logging.info("failed to send "+pickID)
             return False
-
 
     def handleTimeout(self):
         repickerResults = _util.pollRepickerResults(self.outgoingDir)
@@ -474,27 +474,13 @@ class App(seiscomp.client.Application):
                   self.outgoingDir, self.sentDir]:
             os.makedirs(d, exist_ok=True)
 
-
     def _loadEvent(self, publicID):
-        # load a bare Event object from database
-        tp = seiscomp.datamodel.Event
-        obj = self.query().loadObject(tp.TypeInfo(), publicID)
-        obj = tp.Cast(obj)
-        if obj is None:
-            seiscomp.logging.error("unknown Event '%s'" % publicID)
-        return obj
+        return _dbutil.loadEvent(self.query(), publicID)
 
     def _loadOrigin(self, publicID):
-        # load an Origin object from database
-        tp = seiscomp.datamodel.Origin
-        obj = self.query().loadObject(tp.TypeInfo(), publicID)
-        obj = tp.Cast(obj)
-        if obj is None:
-            seiscomp.logging.error("unknown Origin '%s'" % publicID)
-        return obj
+        return _dbutil.loadOrigin(self.query(), publicID)
 
     def _loadWaveformsForPicks(self, picks, event):
-
         request = list()
         for pickID in picks:
             pick = picks[pickID]
@@ -905,7 +891,6 @@ class App(seiscomp.client.Application):
         origin = self._loadOrigin(originID)
         self.processOrigin(origin, event)
         self.cleanup()
-
 
     def run(self):
         self.dumpConfiguration()

@@ -16,11 +16,16 @@
 ###########################################################################
 
 
+import time
 import seiscomp.datamodel
 import seiscomp.logging
-import scdlpicker.util
+import scdlpicker.util as _util
+import scdlpicker.dbutil as _dbutil
+import scdlpicker.defaults as _defaults
+import scdlpicker.inventory as _inventory
 
-def loadEvent(query, eventID):
+
+def loadEvent(query, publicID):
     """
     Retrieve event from DB incl. children
    
@@ -29,12 +34,37 @@ def loadEvent(query, eventID):
 
     Uses loadObject() to also load the children.
     """
-    event = query.loadObject(seiscomp.datamodel.Event.TypeInfo(), eventID)
-    event = seiscomp.datamodel.Event.Cast(event)
-    if event:
-        if event.eventDescriptionCount() == 0:
-            query.loadEventDescriptions(event)
-    return event
+    tp = seiscomp.datamodel.Event
+    t0 = time.time()
+    obj = query.loadObject(tp.TypeInfo(), publicID)
+    dt = time.time() - t0
+    msg =  "query took %.3f sec for event '%s'" % (dt, publicID)
+    log = seiscomp.logging.warning if dt > 0.1 else seiscomp.logging.debug
+    log(msg)
+
+    obj = tp.Cast(obj)
+    if obj:
+        if obj.eventDescriptionCount() == 0:
+            query.loadEventDescriptions(obj)
+    else:
+        seiscomp.logging.error("unknown Event '%s'" % publicID)
+    return obj
+
+
+def loadOrigin(query, publicID):
+    # load an Origin object from database
+    tp = seiscomp.datamodel.Origin
+    t0 = time.time()
+    obj = query.loadObject(tp.TypeInfo(), publicID)
+    dt = time.time() - t0
+    msg =  "query took %.3f sec for event '%s'" % (dt, publicID)
+    log = seiscomp.logging.warning if dt > 0.1 else seiscomp.logging.debug
+    log(msg)
+
+    obj = tp.Cast(obj)
+    if obj is None:
+        seiscomp.logging.error("unknown Origin '%s'" % publicID)
+    return obj
 
 
 def loadOriginWithoutArrivals(query, orid, strip=False):
@@ -75,7 +105,7 @@ def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplit
     for obj in query.getPicks(startTime, endTime):
         pick = seiscomp.datamodel.Pick.Cast(obj)
         if pick:
-            if scdlpicker.util.authorOf(pick) not in allowedAuthorIDs:
+            if _util.authorOf(pick) not in allowedAuthorIDs:
                 continue
             objects[pick.publicID()] = pick
 
@@ -115,18 +145,18 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
     ttt = seiscomp.seismology.TravelTimeTable()
 
     # retrieve a dict of station instances from inventory
-    station = scdlpicker.inventory.getStations(inventory, etime)
+    station = _inventory.getStations(inventory, etime)
 
     startTime = origin.time().value()
     endTime = startTime + seiscomp.core.TimeSpan(1200.)
-    picks = scdlpicker.dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
+    picks = _dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
 
     # We can have duplicate DL picks for any stream (nslc) but we
     # only want one pick per nslc.
     picks_per_nslc = dict()
     for pickID in picks:
         pick = picks[pickID]
-        nslc = scdlpicker.util.nslc(pick)
+        nslc = _util.nslc(pick)
         if nslc not in picks_per_nslc:
             picks_per_nslc[nslc] = []
         picks_per_nslc[nslc].append(pick)
@@ -159,12 +189,9 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
         theo = etime + seiscomp.core.TimeSpan(ptime.time)
         dt = float(pick.time().value() - theo)
 
-        maxDelta = scdlpicker.defaults.maxDelta
-        maxResidual = scdlpicker.defaults.maxResidual
-
         # initially we grab more picks than within the final
         # residual range and trim the residuals later.
-        if -2*maxResidual < dt < 2*maxResidual:
+        if -2*_defaults.maxResidual < dt < 2*_defaults.maxResidual:
             result.append(pick)
 
             phase = seiscomp.datamodel.Phase()
@@ -172,14 +199,14 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
             arr = seiscomp.datamodel.Arrival()
             arr.setPhase(phase)
             arr.setPickID(pickID)
-            arr.setTimeUsed(delta <= maxDelta)
+            arr.setTimeUsed(delta <= _defaults.maxDelta)
             arr.setWeight(1.)
             origin.add(arr)
             print(pickID, "+++", dt)
         else:
             print(pickID, "---", dt)
 
-    for arr in scdlpicker.util.ArrivalIterator(origin):
+    for arr in _util.ArrivalIterator(origin):
         pickID = arr.pickID()
         if not seiscomp.datamodel.Pick.Find(pickID):
             seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")

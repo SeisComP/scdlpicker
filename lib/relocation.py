@@ -19,8 +19,8 @@ import seiscomp.core
 import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.seismology
+import scdlpicker.util as _util
 
-import scdlpicker.util
 
 def trimLargestResidual(origin, maxResidual):
     """
@@ -32,7 +32,7 @@ def trimLargestResidual(origin, maxResidual):
     """
 
     largest = None
-    for arr in scdlpicker.util.ArrivalIterator(origin):
+    for arr in _util.ArrivalIterator(origin):
 
         if not arr.timeUsed():
             continue
@@ -66,7 +66,7 @@ def trimLargestResidual(origin, maxResidual):
 
 def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
 
-    scdlpicker.util.summarize(origin)
+    _util.summarize(origin)
 
     origin = seiscomp.datamodel.Origin.Cast(origin)
 
@@ -100,9 +100,9 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             # relocate an origin. At the moment we cannot
             # repair that and therefore have to give up. But
             # before that we dump the origin and picks to XML.
-            scdlpicker.util.summarize(origin, withPicks=True)
-            timestamp = scdlpicker.util.isotimestamp(now)
-            scdlpicker.util.dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
+            _util.summarize(origin, withPicks=True)
+            timestamp = _util.isotimestamp(now)
+            _util.dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
                 % (eventID, timestamp))
             seiscomp.logging.error("Giving up")
             relocated = None
@@ -117,8 +117,8 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
                 relocated = loc.relocate(origin)
                 relocated = seiscomp.datamodel.Origin.Cast(relocated)
             except RuntimeError:
-                timestamp = scdlpicker.util.isotimestamp(now)
-                scdlpicker.util.dumpOriginXML(
+                timestamp = _util.isotimestamp(now)
+                _util.dumpOriginXML(
                     origin, "%s-%s-failed-relocation.xml" % (eventID, timestamp))
                 relocated = None
                 break
@@ -135,7 +135,7 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
     if relocated.arrivalCount() == 0:
         return
 
-    if scdlpicker.util.uncertainty(relocated.depth()):
+    if _util.uncertainty(relocated.depth()):
         relocated.setDepthType(seiscomp.datamodel.FROM_LOCATION)
         # TODO: CONSTRAINED_BY_DEPTH_PHASES
     else:
