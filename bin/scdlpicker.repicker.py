@@ -506,7 +506,10 @@ class Repicker:
 
                 confidence = annotation.data.astype(np.double)
                 times = annotation.times()
-                peaks, _ = scipy.signal.find_peaks(confidence, height=0.1)
+
+                # The required min. distance between peaks is one second,
+                # i.e. the sampling rate controls the number of samples.
+                peaks, _ = scipy.signal.find_peaks(confidence, height=0.1, distance=self.model.sampling_rate)
                 for peak in peaks:
                     picktime = annotation.stats.starttime + times[peak]
                     if pick.publicID not in predictions:
