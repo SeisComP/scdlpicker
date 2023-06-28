@@ -131,7 +131,7 @@ def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplit
 
 
 
-def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
+def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
     etime = origin.time().value()
     elat = origin.latitude().value()
     elon = origin.longitude().value()
@@ -183,6 +183,9 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
 
         delta, az, baz = seiscomp.math.delazi_wgs84(elat, elon, slat, slon)
 
+        if delta > maxDelta:
+            continue
+
         ttimes = ttt.compute(0, 0, edep, 0, delta, 0, 0)
         ptime = ttimes[0]
 
@@ -191,20 +194,21 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, query):
 
         # initially we grab more picks than within the final
         # residual range and trim the residuals later.
-        if -2*_defaults.maxResidual < dt < 2*_defaults.maxResidual:
-            result.append(pick)
-
-            phase = seiscomp.datamodel.Phase()
-            phase.setCode("P")
-            arr = seiscomp.datamodel.Arrival()
-            arr.setPhase(phase)
-            arr.setPickID(pickID)
-            arr.setTimeUsed(delta <= _defaults.maxDelta)
-            arr.setWeight(1.)
-            origin.add(arr)
-            print(pickID, "+++", dt)
-        else:
+        if not -2*_defaults.maxResidual < dt < 2*_defaults.maxResidual:
             print(pickID, "---", dt)
+            continue
+
+        result.append(pick)
+
+        phase = seiscomp.datamodel.Phase()
+        phase.setCode("P")
+        arr = seiscomp.datamodel.Arrival()
+        arr.setPhase(phase)
+        arr.setPickID(pickID)
+        arr.setTimeUsed(delta <= _defaults.maxDelta)
+        arr.setWeight(1.)
+        origin.add(arr)
+        print(pickID, "+++", dt)
 
     for arr in _util.ArrivalIterator(origin):
         pickID = arr.pickID()

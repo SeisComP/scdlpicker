@@ -33,11 +33,11 @@ import seiscomp.datamodel
 import seiscomp.logging
 import seiscomp.math
 import seiscomp.seismology
-import scdlpicker.dbutil
-import scdlpicker.util
-import scdlpicker.inventory
-import scdlpicker.relocation
-import scdlpicker.defaults
+import scdlpicker.dbutil as _dbutil
+import scdlpicker.util as _util
+import scdlpicker.inventory as _inventory
+import scdlpicker.relocation as _relocation
+import scdlpicker.defaults as _defaults
 
 
 
@@ -50,10 +50,11 @@ class RelocatorApp(seiscomp.client.Application):
         self.setLoadInventoryEnabled(True)
         self.setPrimaryMessagingGroup("LOCATION")
 
-        self.minimumDepth = scdlpicker.defaults.minimumDepth
-        self.maxResidual = scdlpicker.defaults.maxResidual
+        self.minimumDepth = _defaults.minimumDepth
+        self.maxDelta = _defaults.maxDelta
+        self.maxResidual = _defaults.maxResidual
 
-        self.allowedAuthorIDs = scdlpicker.defaults.allowedAuthorIDs
+        self.allowedAuthorIDs = _defaults.allowedAuthorIDs
 
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
@@ -66,6 +67,7 @@ class RelocatorApp(seiscomp.client.Application):
         self.commandline().addDoubleOption("Target", "fixed-depth", "fix the depth at the specified value (in kilometers)");
         self.commandline().addDoubleOption("Target", "max-residual", "limit the individual pick residual to the specified value (in seconds)");
         self.commandline().addDoubleOption("Target", "max-rms", "limit the pick residual RMS to the specified value (in seconds)");
+        self.commandline().addDoubleOption("Target", "max-delta", "limit the station distance to the specified value (in degrees)");
         self.commandline().addOption("Target", "test", "test mode - don't send the result");
 
 
@@ -103,7 +105,7 @@ class RelocatorApp(seiscomp.client.Application):
 #           # self.query().loadArrivals(origin)
 
 #           seiscomp.logging.info("Loading corresponding picks")
-#           for arr in scdlpicker.util.ArrivalIterator(origin):
+#           for arr in _util.ArrivalIterator(origin):
 #               pid = arr.pickID()
 #               if pid in picks:
 #                   continue
@@ -118,13 +120,13 @@ class RelocatorApp(seiscomp.client.Application):
     def processEvent(self, eventID):
         seiscomp.logging.info("Working on event "+eventID)
 
-        event  = scdlpicker.dbutil.loadEvent(self.query(), eventID)
-        origin = scdlpicker.dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
+        event  = _dbutil.loadEvent(self.query(), eventID)
+        origin = _dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
 
         # Load all picks for a matching time span, independent of their association. 
-        origin, picks = scdlpicker.dbutil.loadPicksForOrigin(origin, self.inventory, self.allowedAuthorIDs, self.query())
+        origin, picks = _dbutil.loadPicksForOrigin(origin, self.inventory, self.allowedAuthorIDs, self.maxDelta, self.query())
 
-        relocated = scdlpicker.relocation.relocate(
+        relocated = _relocation.relocate(
             origin, eventID, self.fixedDepth, self.minimumDepth, self.maxResidual)
 
         if not relocated:
@@ -132,7 +134,7 @@ class RelocatorApp(seiscomp.client.Application):
             return
 
         now = seiscomp.core.Time.GMT()
-        ci = scdlpicker.util.creationInfo(self.author, self.agencyID, now)
+        ci = _util.creationInfo(self.author, self.agencyID, now)
         relocated.setCreationInfo(ci)
         relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 
@@ -149,7 +151,7 @@ class RelocatorApp(seiscomp.client.Application):
             if self.connection().send(msg):
                 seiscomp.logging.info("sent "+relocated.publicID())
 
-        scdlpicker.util.summarize(relocated)
+        _util.summarize(relocated)
 
 
     def run(self):
@@ -178,14 +180,19 @@ class RelocatorApp(seiscomp.client.Application):
             self.fixedDepth = None
 
         try:
+            self.maxDelta = self.commandline().optionDouble("max-delta")
+        except RuntimeError:
+            self.maxDelta = _defaults.maxDelta
+
+        try:
             self.maxResidual = self.commandline().optionDouble("max-residual")
         except RuntimeError:
-            self.maxResidual = scdlpicker.defaults.maxResidual
+            self.maxResidual = _defaults.maxResidual
 
         try:
             self.maxRMS = self.commandline().optionDouble("max-rms")
         except RuntimeError:
-            self.maxRMS = scdlpicker.defaults.maxRMS
+            self.maxRMS = _defaults.maxRMS
 
         eventIDs = self.commandline().optionString("event").split()
         for eventID in eventIDs:

@@ -298,9 +298,10 @@ class RelocatorApp(seiscomp.client.Application):
             seiscomp.logging.debug("not fixing depth")
 
         # Load all picks for a matching time span, independent of association.
+        maxDelta = _defaults.maxDelta
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
-                origin, self.inventory, self.allowedAuthorIDs, self.query())
+                origin, self.inventory, self.allowedAuthorIDs, maxDelta, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
