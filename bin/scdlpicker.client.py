@@ -106,11 +106,12 @@ def isRepick(pick):
     Is this already a repick?
     """
 
-    if pick.publicID().endswith("/repicked"):
-        return True
+#   if pick.publicID().endswith("/repicked"):
+#       return True
 
+    methodIDs = [ "DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]
     try:
-        if pick.methodID() == "DL":
+        if pick.methodID() in [ "DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]:
             return True
     except (AttributeError, ValueError):
         pass
@@ -370,6 +371,7 @@ class App(seiscomp.client.Application):
         if connection.send(msg):
             for pickID in picks:
                 seiscomp.logging.info("sent "+pickID)
+            seiscomp.logging.info("sent %d picks" % (len(picks),))
             return True
         else:
             for pickID in picks:
@@ -377,6 +379,16 @@ class App(seiscomp.client.Application):
             return False
 
     def handleTimeout(self):
+        self.pollResults()
+        self.processPendingEvents()
+
+    def pollResults(self):
+        # Poll for repicker results between each event.
+        # 
+        # Note that we poll here for any results, not just the current
+        # event.
+        # This doesn't cost much and in case of aftershocks it is really
+        # needed in order to avoid long delays or deadlocks.
         repickerResults = _util.pollRepickerResults(self.outgoingDir)
         if repickerResults:
             for yamlfile in repickerResults:
@@ -386,23 +398,11 @@ class App(seiscomp.client.Application):
                     sent = os.path.join(self.sentDir, f)
                     os.rename(yamlfile, sent)
 
-        self.processPendingEvents()
-
     def processPendingEvents(self):
         for eventID in sorted(self.pendingEvents.keys()):
             event = self.pendingEvents.pop(eventID)
             self.processEvent(event)
-            # Poll for results between each event. It doesn't cost much
-            # and in case of aftershocks is really needed in order to
-            # avoid deadlocks.
-            repickerResults = _util.pollRepickerResults(self.outgoingDir)
-            if repickerResults:
-                for yamlfile in repickerResults:
-                    picks, comments = _util.readRepickerResults(yamlfile)
-                    if self.sendRepickerResults(picks, comments):
-                        d, f = os.path.split(yamlfile)
-                        sent = os.path.join(self.sentDir, f)
-                        os.rename(yamlfile, sent)
+            self.pollResults()
 
     def findUnpickedStations(self, origin, maxDelta, picks):
         """
@@ -481,7 +481,7 @@ class App(seiscomp.client.Application):
         return _dbutil.loadOrigin(self.query(), publicID)
 
     def _loadWaveformsForPicks(self, picks, event):
-        request = list()
+        request = dict()
         for pickID in picks:
             pick = picks[pickID]
             wfid = pick.waveformID()
@@ -514,7 +514,8 @@ class App(seiscomp.client.Application):
                 # This may occur if a station was (1) blacklisted or (2) added
                 # to the processing later on. Either way we skip this pick.
                 continue
-            request.append((t1, t2, net, sta, loc, cha))
+            nslc = (net, sta, loc, cha)
+            request[nslc] = (t1, t2)
             t1 = _util.isotimestamp(t1)
             t2 = _util.isotimestamp(t2)
             seiscomp.logging.debug("REQUEST %-2s %-5s %-2s %-2s %s %s"
@@ -528,7 +529,9 @@ class App(seiscomp.client.Application):
             stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
             stream.setTimeout(streamTimeout)
             streamCount = 0
-            for t1, t2, net, sta, loc, cha in request:
+            for nslc in sorted(request.keys()):
+                net, sta, loc, cha = nslc
+                t1, t2 = request[nslc]
                 for comp in self.components[(net, sta, loc, cha[:2])]:
                     _loc = "" if loc == "--" else loc
                     stream.addStream(net, sta, _loc, cha[:2]+comp, t1, t2)
@@ -664,9 +667,7 @@ class App(seiscomp.client.Application):
 
     def updateObject(self, parentID, obj):
         # called by the Application class if an updated object is received
-        event = seiscomp.datamodel.Event.Cast(obj)
-        if _util.valid(event):
-            self.pendingEvents[event.publicID()] = event
+        self.addObject(parentID, obj)
 
     def cleanup(self, timeout=30*3600):
         # timeout = 86400 # one day
@@ -779,6 +780,7 @@ class App(seiscomp.client.Application):
         tmp = "%d" % len(workspace.new_picks) if workspace.new_picks else "no"
         seiscomp.logging.debug(tmp+" new picks")
 
+        # Load additional waveforms
         waveforms = self._loadWaveformsForPicks(workspace.new_picks, event)
         for streamID in waveforms:
             workspace.waveforms[streamID] = waveforms[streamID]

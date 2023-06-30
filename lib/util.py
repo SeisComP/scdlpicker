@@ -449,11 +449,9 @@ def readRepickerResults(path):
             if seiscomp.datamodel.Pick.Find(pickID):
                 # FIXME HACK FIXME
                 seiscomp.logging.debug("FIXME: "+pickID)
-            pick = seiscomp.datamodel.Pick(pickID)
             time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
             tq = seiscomp.datamodel.TimeQuantity()
             tq.setValue(time)
-            pick.setTime(tq)
             net = p["networkCode"]
             sta = p["stationCode"]
             loc = p["locationCode"]
@@ -465,6 +463,20 @@ def readRepickerResults(path):
             wfid.setStationCode(sta)
             wfid.setLocationCode("" if loc == "--" else loc)
             wfid.setChannelCode(cha)
+
+            model = p["model"].lower()
+            if model == "eqtransformer":
+                mth = "EQT"
+            elif model == "phasenet":
+                mth = "PHN"
+            else:
+                mth = "XYZ"
+            decimals = 2
+            nslcstr = net + "." + sta + "." + loc + "." + cha[:2]
+            timestr = time.toString("%Y%m%d.%H%M%S.%f000000")[:16+decimals] 
+            pickID = timestr + "-" + mth + "-" + nslcstr
+            pick = seiscomp.datamodel.Pick(pickID)
+            pick.setTime(tq)
             pick.setWaveformID(wfid)
 
             comments = []
