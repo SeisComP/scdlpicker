@@ -101,6 +101,7 @@ def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplit
     also all amplitudes that reference any of these picks may be returned.
     """
 
+    seiscomp.logging.debug("loading picks for %s ... %s" % (_util.time2str(startTime), _util.time2str(endTime)))
     objects = dict()
     for obj in query.getPicks(startTime, endTime):
         pick = seiscomp.datamodel.Pick.Cast(obj)
@@ -137,19 +138,57 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
     elon = origin.longitude().value()
     edep = origin.depth().value()
 
-    # clear all arrivals
+    # Clear all arrivals
     while origin.arrivalCount():
         origin.removeArrival(0)
 
-    # uses the iasp91 tables by default
+    # Uses the iasp91 tables by default
     ttt = seiscomp.seismology.TravelTimeTable()
 
-    # retrieve a dict of station instances from inventory
+    # Retrieve a dict of station instances from inventory
     station = _inventory.getStations(inventory, etime)
 
+    # Time span is 20 min for teleseismic applications
     startTime = origin.time().value()
     endTime = startTime + seiscomp.core.TimeSpan(1200.)
     picks = _dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
+
+
+    # At this point there are many picks we are not interested in because
+    # we searched globally for a large time window. We need to focus on the
+    # interesting picks, now based on theoretical travel times.
+
+    interesting_picks = dict()
+    for pickID in picks:
+        pick = picks[pickID]
+        nslc = _util.nslc(pick)
+        n, s, l, c = nslc
+        try:
+            sta = station[n, s]
+        except KeyError as e:
+            seiscomp.logging.error(str(e))
+            continue
+
+        slat = sta.latitude()
+        slon = sta.longitude()
+
+        delta, az, baz = seiscomp.math.delazi_wgs84(elat, elon, slat, slon)
+
+        if delta > maxDelta:
+            continue
+
+        ttimes = ttt.compute(0, 0, edep, 0, delta, 0, 0)
+        ptime = ttimes[0]
+
+        theo = etime + seiscomp.core.TimeSpan(ptime.time)
+        dt = float(pick.time().value() - theo)
+
+        if not -4*_defaults.maxResidual < dt < 4*_defaults.maxResidual:
+            continue
+
+        interesting_picks[pickID] = pick
+
+    picks = interesting_picks
 
     # We can have duplicate DL picks for any stream (nslc) but we
     # only want one pick per nslc.
@@ -161,7 +200,6 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
             picks_per_nslc[nslc] = []
         picks_per_nslc[nslc].append(pick)
 
-
     result = []
     for nslc in picks_per_nslc:
         # the first pick per nslc # TODO: review
@@ -171,9 +209,9 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
         pick = sorted_picks[0]
         pickID = pick.publicID()
 
-        n,s,l,c = nslc
+        n, s, l, c = nslc
         try:
-            sta = station[n,s]
+            sta = station[n, s]
         except KeyError as e:
             seiscomp.logging.error(str(e))
             continue
