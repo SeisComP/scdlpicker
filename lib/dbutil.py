@@ -28,7 +28,7 @@ import scdlpicker.inventory as _inventory
 def loadEvent(query, publicID):
     """
     Retrieve event from DB incl. children
-   
+
     Returns either the event instance
     or None if event could not be loaded.
 
@@ -70,7 +70,7 @@ def loadOrigin(query, publicID):
 def loadOriginWithoutArrivals(query, orid, strip=False):
     """
     Retrieve origin from DB *without* children
-    
+
     Returns either the origin instance
     or None if origin could not be loaded.
     """
@@ -95,13 +95,15 @@ def loadMagnitude(query, orid):
     return seiscomp.datamodel.Magnitude.Cast(obj)
 
 
-def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplitudes=False):
+def loadPicksForTimespan(query, startTime, endTime,
+                         allowedAuthorIDs, withAmplitudes=False):
     """
     Load from the database all picks within the given time span. If specified,
     also all amplitudes that reference any of these picks may be returned.
     """
 
-    seiscomp.logging.debug("loading picks for %s ... %s" % (_util.time2str(startTime), _util.time2str(endTime)))
+    seiscomp.logging.debug("loading picks for %s ... %s" % (
+        _util.time2str(startTime), _util.time2str(endTime)))
     objects = dict()
     for obj in query.getPicks(startTime, endTime):
         pick = seiscomp.datamodel.Pick.Cast(obj)
@@ -131,7 +133,6 @@ def loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs, withAmplit
     return objects
 
 
-
 def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
     etime = origin.time().value()
     elat = origin.latitude().value()
@@ -151,8 +152,8 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
     # Time span is 20 min for teleseismic applications
     startTime = origin.time().value()
     endTime = startTime + seiscomp.core.TimeSpan(1200.)
-    picks = _dbutil.loadPicksForTimespan(query, startTime, endTime, allowedAuthorIDs)
-
+    picks = _dbutil.loadPicksForTimespan(
+        query, startTime, endTime, allowedAuthorIDs)
 
     # At this point there are many picks we are not interested in because
     # we searched globally for a large time window. We need to focus on the

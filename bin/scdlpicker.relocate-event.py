@@ -26,7 +26,7 @@ This is a very simple relocator that
 """
 
 
-import sys, time
+import sys
 import seiscomp.core
 import seiscomp.client
 import seiscomp.datamodel
@@ -35,10 +35,8 @@ import seiscomp.math
 import seiscomp.seismology
 import scdlpicker.dbutil as _dbutil
 import scdlpicker.util as _util
-import scdlpicker.inventory as _inventory
 import scdlpicker.relocation as _relocation
 import scdlpicker.defaults as _defaults
-
 
 
 class RelocatorApp(seiscomp.client.Application):
@@ -58,18 +56,36 @@ class RelocatorApp(seiscomp.client.Application):
 
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
-        self.commandline().addGroup("Config");
-        self.commandline().addStringOption("Config", "author", "Author of created objects");
-        self.commandline().addStringOption("Config", "agency", "Agency of created objects");
-        self.commandline().addGroup("Target");
-        self.commandline().addStringOption("Target", "event,E",  "load the specified event");
-        self.commandline().addStringOption("Target", "pick-authors", "space-separated whitelist of pick authors");
-        self.commandline().addDoubleOption("Target", "fixed-depth", "fix the depth at the specified value (in kilometers)");
-        self.commandline().addDoubleOption("Target", "max-residual", "limit the individual pick residual to the specified value (in seconds)");
-        self.commandline().addDoubleOption("Target", "max-rms", "limit the pick residual RMS to the specified value (in seconds)");
-        self.commandline().addDoubleOption("Target", "max-delta", "limit the station distance to the specified value (in degrees)");
-        self.commandline().addOption("Target", "test", "test mode - don't send the result");
-
+        self.commandline().addGroup("Config")
+        self.commandline().addStringOption(
+            "Config", "author",
+            "Author of created objects")
+        self.commandline().addStringOption(
+            "Config", "agency",
+            "Agency of created objects")
+        self.commandline().addGroup("Target")
+        self.commandline().addStringOption(
+            "Target", "event,E",
+            "load the specified event")
+        self.commandline().addStringOption(
+            "Target", "pick-authors",
+            "space-separated whitelist of pick authors")
+        self.commandline().addDoubleOption(
+            "Target", "fixed-depth",
+            "fix the depth at the specified value (in kilometers)")
+        self.commandline().addDoubleOption(
+            "Target", "max-residual",
+            "limit the individual pick residual to the specified value "
+            "(in seconds)")
+        self.commandline().addDoubleOption(
+            "Target", "max-rms",
+            "limit the pick residual RMS to the specified value (in seconds)")
+        self.commandline().addDoubleOption(
+            "Target", "max-delta",
+            "limit the station distance to the specified value (in degrees)")
+        self.commandline().addOption(
+            "Target", "test",
+            "test mode - don't send the result")
 
     def init(self):
         if not super(RelocatorApp, self).init():
@@ -78,7 +94,6 @@ class RelocatorApp(seiscomp.client.Application):
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
         return True
-
 
     def _load(self, oid, tp):
         assert oid is not None
@@ -116,18 +131,22 @@ class RelocatorApp(seiscomp.client.Application):
 #           seiscomp.logging.info("Loading completed")
 #       return event, origins, picks
 
-
     def processEvent(self, eventID):
         seiscomp.logging.info("Working on event "+eventID)
 
         event  = _dbutil.loadEvent(self.query(), eventID)
-        origin = _dbutil.loadOriginWithoutArrivals(self.query(), event.preferredOriginID())
+        origin = _dbutil.loadOriginWithoutArrivals(
+            self.query(), event.preferredOriginID())
 
-        # Load all picks for a matching time span, independent of their association. 
-        origin, picks = _dbutil.loadPicksForOrigin(origin, self.inventory, self.allowedAuthorIDs, self.maxDelta, self.query())
+        # Load all picks for a matching time span, independent of their
+        # association.
+        origin, picks = _dbutil.loadPicksForOrigin(
+            origin, self.inventory, self.allowedAuthorIDs,
+            self.maxDelta, self.query())
 
         relocated = _relocation.relocate(
-            origin, eventID, self.fixedDepth, self.minimumDepth, self.maxResidual)
+            origin, eventID, self.fixedDepth,
+            self.minimumDepth, self.maxResidual)
 
         if not relocated:
             seiscomp.logging.info("No relocation result for event "+eventID)
@@ -153,9 +172,7 @@ class RelocatorApp(seiscomp.client.Application):
 
         _util.summarize(relocated)
 
-
     def run(self):
-
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
         try:

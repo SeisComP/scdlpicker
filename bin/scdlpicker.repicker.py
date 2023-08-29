@@ -453,7 +453,8 @@ class Repicker:
 
         return True
 
-    def fill_result(self, predictions, stream, collected_picks, annot_d, eventID):
+    def fill_result(self, predictions, stream, collected_picks,
+                    annot_d, eventID):
         """Fills `predictions` with annotations done by the model
            using the stream. Additional data will be taken from
            `collected_picks`.
@@ -476,9 +477,9 @@ class Repicker:
 
                     pick = next(filter(
                         lambda p:
-                        p.networkCode == annotation.meta.network and
-                        p.stationCode == annotation.meta.station and
-                        p.locationCode == annotation.meta.location,
+                        p.networkCode == annotation.meta.network
+                        and p.stationCode == annotation.meta.station
+                        and p.locationCode == annotation.meta.location,
                         collected_picks))
                 except StopIteration:
                     logger.warning(
@@ -509,15 +510,16 @@ class Repicker:
 
                 # The required min. distance between peaks is one second,
                 # i.e. the sampling rate controls the number of samples.
-                peaks, _ = scipy.signal.find_peaks(confidence, height=0.1, distance=self.model.sampling_rate)
+                peaks, _ = scipy.signal.find_peaks(
+                    confidence, height=0.1, distance=self.model.sampling_rate)
                 for peak in peaks:
                     picktime = annotation.stats.starttime + times[peak]
                     if pick.publicID not in predictions:
                         predictions[pick.publicID] = []
                     new_item = (picktime, confidence[peak])
                     predictions[pick.publicID].append(new_item)
-                    logger.debug("#### " + pick.publicID +
-                                 "  %.3f" % confidence[peak])
+                    logger.debug(
+                        "#### " + pick.publicID + "  %.3f" % confidence[peak])
 
                 collected_picks.remove(pick)
 

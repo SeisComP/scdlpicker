@@ -22,4 +22,3 @@ maxDelta = 105.
 # List of allowed pick authors.
 
 allowedAuthorIDs = ["dlpicker"]
-

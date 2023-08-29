@@ -17,8 +17,6 @@
 
 import sys
 import os
-import time
-import yaml
 import numpy
 import seiscomp.core
 import seiscomp.client
@@ -109,9 +107,9 @@ def isRepick(pick):
 #   if pick.publicID().endswith("/repicked"):
 #       return True
 
-    methodIDs = [ "DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]
+    methodIDs = ["DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]
     try:
-        if pick.methodID() in [ "DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]:
+        if pick.methodID() in methodIDs:
             return True
     except (AttributeError, ValueError):
         pass
@@ -327,8 +325,8 @@ class App(seiscomp.client.Application):
         self.setupFolders()
         now = seiscomp.core.Time.GMT()
         self.components = _inventory.streamComponents(
-                self.inventory, now,
-                net_sta_blacklist=global_net_sta_blacklist)
+            self.inventory, now,
+            net_sta_blacklist=global_net_sta_blacklist)
 
         configModule = self.configModule()
         myName = self.name()
@@ -384,7 +382,7 @@ class App(seiscomp.client.Application):
 
     def pollResults(self):
         # Poll for repicker results between each event.
-        # 
+        #
         # Note that we poll here for any results, not just the current
         # event.
         # This doesn't cost much and in case of aftershocks it is really
@@ -434,7 +432,8 @@ class App(seiscomp.client.Application):
             # nslc = (net, sta, loc, cha)
             if (net, sta) in net_sta_blacklist:
                 continue
-            if (net, sta, "--" if loc == "" else loc, cha) not in self.configuredStreams:
+            if (net, sta, "--" if loc == "" else loc, cha) \
+                    not in self.configuredStreams:
                 continue
             slat = station.latitude()
             slon = station.longitude()
@@ -544,7 +543,7 @@ class App(seiscomp.client.Application):
                 if rec is None:
                     break
                 streamID = rec.streamID()
-                if not streamID in waveforms:
+                if streamID not in waveforms:
                     waveforms[streamID] = []
                 waveforms[streamID].append(rec)
                 count += 1

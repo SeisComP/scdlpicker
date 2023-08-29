@@ -48,16 +48,16 @@ def nslc(obj):
         c = obj.channelCode()
     else:
         return nslc(obj.waveformID())
-    return n,s,l,c
+    return n, s, l, c
 
 
 def uncertainty(quantity):
     try:
         err = 0.5*(quantity.lowerUncertainty()+quantity.upperUncertainty())
-    except:
+    except ValueError:
         try:
             err = quantity.uncertainty()
-        except:
+        except ValueError:
             err = None
     return err
 
@@ -65,7 +65,7 @@ def uncertainty(quantity):
 def authorOf(obj):
     try:
         return obj.creationInfo().author()
-    except:
+    except ValueError:
         return None
 
 
@@ -87,7 +87,7 @@ def sumOfLargestGaps(azi, n=2):
 
     gap = []
     aziCount = len(azi)
-    if aziCount<2:
+    if aziCount < 2:
         return 360.
     azi = sorted(azi)
 
@@ -114,7 +114,7 @@ def computeTGap(origin, maxDelta=180, minWeight=0.5):
             azimuth = arr.azimuth()
             weight  = arr.weight()
             delta   = arr.distance()
-        except:
+        except ValueError:
             continue
         if weight > minWeight and delta < maxDelta:
             azimuth = math.fmod(azimuth, 360.)
@@ -129,38 +129,41 @@ def isotimestamp(time, decimals=3):
     """
     Convert a seiscomp.core.Time to a timestamp YYYY-MM-DDTHH:MM:SS.sssZ
     """
-    return time.toString("%Y-%m-%dT%H:%M:%S.%f000000")[:20+decimals].strip(".")+"Z"
+    s = time.toString("%Y-%m-%dT%H:%M:%S.%f000000")
+    s = s[:20+decimals].strip(".") + "Z"
+    return s
 
 
 def time2str(time, decimals=1):
     """
     Convert a seiscomp.core.Time to a string YYYY-MM-DD HH:MM:SS.s
     """
-    return time.toString("%Y-%m-%d %H:%M:%S.%f000000")[:20+decimals]
-
+    s = time.toString("%Y-%m-%d %H:%M:%S.%f000000")
+    s = s[:20+decimals]
+    return s
 
 
 def RecordIterator(recordstream, showprogress=False):
-        count = 0
-        # It would be desirable to not need to unpack the records.
-        # Just pass around the raw records.
-        inp = seiscomp.io.RecordInput(
-                    recordstream,
-                    seiscomp.core.Array.INT,
-                    seiscomp.core.Record.SAVE_RAW)
-        while True:
-            try:
-                rec = inp.next()
-            except Exception as exc:
-                seiscomp.logging.error(str(exc))
-                rec = None
+    count = 0
+    # It would be desirable to not need to unpack the records.
+    # Just pass around the raw records.
+    inp = seiscomp.io.RecordInput(
+                recordstream,
+                seiscomp.core.Array.INT,
+                seiscomp.core.Record.SAVE_RAW)
+    while True:
+        try:
+            rec = inp.next()
+        except Exception as exc:
+            seiscomp.logging.error(str(exc))
+            rec = None
 
-            if not rec:
-                break
-            if showprogress:
-                count += 1
-                sys.stderr.write("%-20s %6d\r" % (rec.streamID(), count))
-            yield rec
+        if not rec:
+            break
+        if showprogress:
+            count += 1
+            sys.stderr.write("%-20s %6d\r" % (rec.streamID(), count))
+        yield rec
 
 
 def ArrivalIterator(origin):
@@ -170,12 +173,15 @@ def ArrivalIterator(origin):
 
 def status(obj):
     try:
-        stat = seiscomp.datamodel.EEvaluationStatusNames.name(obj.evaluationStatus())
-    except:
+        stat = obj.evaluationStatus()
+        stat = seiscomp.datamodel.EEvaluationStatusNames.name(stat)
+    except ValueError:
         stat = "NULL"
+
     try:
-        mode = seiscomp.datamodel.EEvaluationModeNames.name(obj.evaluationMode())
-    except:
+        mode = obj.evaluationMode()
+        mode = seiscomp.datamodel.EEvaluationModeNames.name(mode)
+    except ValueError:
         mode = "NULL"
     return "%s / %s" % (mode, stat)
 
@@ -192,7 +198,7 @@ def valid(event):
         if typename.lower() in [
                 "not existing", "not locatable", "other", "not reported"]:
             return False
-    except:
+    except ValueError:
         pass
     return True
 
@@ -255,8 +261,9 @@ def summarize(obj, withPicks=False):
 
 
 def dumpOriginXML(origin, xmlFileName):
-    seiscomp.logging.debug("dumping origin '%s' to XML file '%s'"
-        % (origin.publicID(), xmlFileName))
+    seiscomp.logging.debug(
+        "dumping origin '%s' to XML file '%s'" % (
+            origin.publicID(), xmlFileName))
     ep = seiscomp.datamodel.EventParameters()
     ep.add(origin)
     for arr in ArrivalIterator(origin):
@@ -281,7 +288,7 @@ def statusFlag(obj):
     try:
         if obj.evaluationMode() == seiscomp.datamodel.MANUAL:
             return "M"
-    except:
+    except ValueError:
         pass
     return "A"
 
@@ -301,26 +308,26 @@ def qualified(origin):
         return True
 
     if origin.arrivalCount() > 0:
-        # Ensure sufficient azimuthal coverage. 
+        # Ensure sufficient azimuthal coverage.
         TGap = computeTGap(origin, maxDelta=90)
         if TGap > 270:
-            seiscomp.logging.debug("Origin %s TGap=%.1f" % (origin.publicID(), TGap))
+            seiscomp.logging.debug(
+                "Origin %s TGap=%.1f" % (origin.publicID(), TGap))
             return False
 
     return True
 
 
-def creationInfo(author, agencyID, time=None):
-    if not time:
+def creationInfo(author, agencyID, creationTime=None):
+    if not creationTime:
         now = seiscomp.core.Time.GMT()
-        time = now
+        creationTime = now
     ci = seiscomp.datamodel.CreationInfo()
     ci.setAuthor(author)
     ci.setAgencyID(agencyID)
-    ci.setCreationTime(time)
-    ci.setModificationTime(time)
+    ci.setCreationTime(creationTime)
+    ci.setModificationTime(creationTime)
     return ci
-
 
 
 def configuredStreams(configModule, myName):
@@ -360,8 +367,9 @@ def configuredStreams(configModule, myName):
         # to check all available parameters.
         for k in range(params.parameterCount()):
             param = params.parameter(k)
-            seiscomp.logging.debug("Config  %s  %s - %s %s"
-                % (net, sta, param.name(), param.value()))
+            seiscomp.logging.debug(
+                "Config  %s  %s - %s %s" % (
+                    net, sta, param.name(), param.value()))
             if param.name() == "detecStream":
                 detecStream = param.value()
             elif param.name() == "detecLocid":
@@ -395,20 +403,12 @@ def prepare(records):
     # different sequence numbers, which have indeed been observed in the
     # wild for otherwise identical records.
     for rec in sorted(records, key=lambda r: r.startTime()):
-        if rec.startTime()==tp1 and rec.endTime()==tp2:
+        if rec.startTime() == tp1 and rec.endTime() == tp2:
             continue
         filtered.append(rec)
         tp1 = rec.startTime()
         tp2 = rec.endTime()
     return filtered
-
-
-def creationInfo(author, agency, creationTime):
-    ci = seiscomp.datamodel.CreationInfo()
-    ci.setAuthor(author)
-    ci.setAgencyID(agency)
-    ci.setCreationTime(creationTime)
-    return ci
 
 
 def pollRepickerResults(resultsDir):
@@ -473,7 +473,7 @@ def readRepickerResults(path):
                 mth = "XYZ"
             decimals = 2
             nslcstr = net + "." + sta + "." + loc + "." + cha[:2]
-            timestr = time.toString("%Y%m%d.%H%M%S.%f000000")[:16+decimals] 
+            timestr = time.toString("%Y%m%d.%H%M%S.%f000000")[:16+decimals]
             pickID = timestr + "-" + mth + "-" + nslcstr
             pick = seiscomp.datamodel.Pick(pickID)
             pick.setTime(tq)

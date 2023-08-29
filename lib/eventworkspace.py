@@ -47,7 +47,6 @@ class EventWorkspace:
         # but have not received
         # self.pending = dict()
 
-
     def writePicksToYAML(self, yamlFileName):
         picks = []
         for key in self.all_picks:
@@ -55,18 +54,17 @@ class EventWorkspace:
             d = dict()
             d["publicID"] = key
             d["time"] = isotimestamp(pick.time().value())
-            n,s,l,c = nslc(pick)
+            n, s, l, c = nslc(pick)
             c = c[:2]
             d["networkCode"] = n
             d["stationCode"] = s
             d["locationCode"] = l
             d["channelCode"] = c
-            d["streamID"] = "%s.%s.%s.%s" % (n,s,l,c)
+            d["streamID"] = "%s.%s.%s.%s" % (n, s, l, c)
             picks.append(d)
 
         with open(yamlFileName, 'w') as file:
             yaml.dump(picks, file)
-
 
     def writeWaveformsToMiniSeed(self, eventRootDir="events", overwrite=True):
         eventID = self.event.publicID()
@@ -82,7 +80,6 @@ class EventWorkspace:
             with open(mseedFileName, "wb") as f:
                 for rec in self.waveforms[key]:
                     f.write(rec.raw().str())
-
 
     def dump(self, eventRootDir="events", spoolDir="spool"):
         """
@@ -120,13 +117,13 @@ class EventWorkspace:
         os.makedirs(spoolDir, exist_ok=True)
         dst = os.path.join(spoolDir, "%s.yaml" % timestamp)
         # TODO: clean up!
-        src = os.path.join("..", eventRootDir, eventID, "in", "%s.yaml" % timestamp)
+        src = os.path.join("..", eventRootDir, eventID, "in",
+                           "%s.yaml" % timestamp)
 
         try:
             seiscomp.logging.debug("creating symlink %s -> %s" % (dst, src))
             os.symlink(src, dst)
-        except FileExistsError as e:
+        except FileExistsError:
             seiscomp.logging.warning("symlink exists %s -> %s" % (dst, src))
 
         return True if not error else False
-

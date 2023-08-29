@@ -27,7 +27,7 @@ def operational(obj, time):
     try:
         start = obj.start()
         assert time >= start
-    except:
+    except ValueError:
         return False
 
     # If the end time of an inventory item is not
@@ -36,7 +36,7 @@ def operational(obj, time):
         end = obj.end()
         if time > end:
             return False
-    except:
+    except ValueError:
         pass
 
     return True
@@ -77,7 +77,7 @@ def InventoryIterator(inventory, time=None):
 def findStation(inventory, nslc, time):
     net, sta, loc, cha = nslc
 
-    for item in scdlpicker.inventory.InventoryIterator(inventory, time=time):
+    for item in InventoryIterator(inventory, time=time):
         network, station, location, stream = item
 
         # return first-matching station object
@@ -95,9 +95,9 @@ def getStations(inventory, time):
         net, sta, loc, stream = item
         n = net.code()
         s = sta.code()
-        if (n,s) in d:
+        if (n, s) in d:
             continue
-        d[n,s] = sta
+        d[n, s] = sta
     return d
 
 

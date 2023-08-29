@@ -36,7 +36,6 @@ import seiscomp.math
 import seiscomp.seismology
 import scdlpicker.dbutil as _dbutil
 import scdlpicker.util as _util
-import scdlpicker.inventory as _inventory
 import scdlpicker.relocation as _relocation
 import scdlpicker.defaults as _defaults
 
@@ -78,7 +77,6 @@ class RelocatorApp(seiscomp.client.Application):
 
         now = seiscomp.core.Time.GMT()
         self._previousPingDB = now
-
 
     def createCommandLineDescription(self):
         seiscomp.client.Application.createCommandLineDescription(self)
@@ -124,7 +122,7 @@ class RelocatorApp(seiscomp.client.Application):
             self._previousPingDB = now
 
     def handleTimeout(self):
-#       self.pingDB()
+        # self.pingDB()
         self.kickOffProcessing()
 
     def addObject(self, parentID, obj):
@@ -154,11 +152,11 @@ class RelocatorApp(seiscomp.client.Application):
     def kickOffProcessing(self):
         # Check for each pending event if it is due to be processed
         for eventID in sorted(self.pendingEvents.keys()):
-#           seiscomp.logging.debug("kickOffProcessing begin " + eventID)
+            # seiscomp.logging.debug("kickOffProcessing begin " + eventID)
             if self.readyToProcess(eventID):
                 self.pendingEvents.pop(eventID)
                 self.processEvent(eventID)
-#           seiscomp.logging.debug("kickOffProcessing   end " + eventID)
+        # seiscomp.logging.debug("kickOffProcessing   end " + eventID)
 
     def readyToProcess(self, eventID, minDelay=1080):
         if eventID not in self.pendingEvents:
@@ -301,7 +299,8 @@ class RelocatorApp(seiscomp.client.Application):
         maxDelta = _defaults.maxDelta
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
-                origin, self.inventory, self.allowedAuthorIDs, maxDelta, self.query())
+                origin, self.inventory,
+                self.allowedAuthorIDs, maxDelta, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 

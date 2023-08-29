@@ -42,7 +42,7 @@ def trimLargestResidual(origin, maxResidual):
                 arr.setTimeUsed(False)
                 arr.setWeight(0.)
                 continue
-        except ValueError as e:
+        except ValueError:
             seiscomp.logging.error(arr.pickID())
 
             raise
@@ -79,7 +79,7 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
     else:
         loc.useFixedDepth(False)
 
-    now = seiscomp.core.Time.GMT()    
+    now = seiscomp.core.Time.GMT()
 
     # Brute-force refine the origin by trimming the arrivals with
     # largest residuals. This is suboptimal because of often large
@@ -102,8 +102,8 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             # before that we dump the origin and picks to XML.
             _util.summarize(origin, withPicks=True)
             timestamp = _util.isotimestamp(now)
-            _util.dumpOriginXML(origin, "%s-%s-failed-relocation.xml"
-                % (eventID, timestamp))
+            _util.dumpOriginXML(
+                origin, "%s-%s-failed-relocation.xml" % (eventID, timestamp))
             seiscomp.logging.error("Giving up")
             relocated = None
             break
@@ -119,7 +119,8 @@ def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):
             except RuntimeError:
                 timestamp = _util.isotimestamp(now)
                 _util.dumpOriginXML(
-                    origin, "%s-%s-failed-relocation.xml" % (eventID, timestamp))
+                    origin,
+                    "%s-%s-failed-relocation.xml" % (eventID, timestamp))
                 relocated = None
                 break
             loc.useFixedDepth(False)
