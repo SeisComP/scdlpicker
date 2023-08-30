@@ -34,7 +34,15 @@ def trimLargestResidual(origin, maxResidual):
     largest = None
     for arr in _util.ArrivalIterator(origin):
 
-        if not arr.timeUsed():
+        try:
+            if not arr.timeUsed():
+                continue
+
+            pickID = arr.pickID()
+            if not pickID:
+                continue
+
+        except ValueError:
             continue
 
         try:
@@ -43,9 +51,17 @@ def trimLargestResidual(origin, maxResidual):
                 arr.setWeight(0.)
                 continue
         except ValueError:
-            seiscomp.logging.error(arr.pickID())
-
+            seiscomp.logging.error(pickID)
             raise
+
+        pick = seiscomp.datamodel.Pick.Find(pickID)
+        if not pick:
+            seiscomp.logging.error(pickID)
+            continue
+
+        if arr.weight() > 0.1 and _util.manual(pick):
+            # Always keep used manual picks!
+            continue
 
         if largest is None:
             largest = arr
@@ -60,8 +76,8 @@ def trimLargestResidual(origin, maxResidual):
         largest.setTimeUsed(False)
         largest.setWeight(0.)
         return True
-    else:
-        False
+
+    return False
 
 
 def relocate(origin, eventID, fixedDepth=None, minimumDepth=5, maxResidual=4):

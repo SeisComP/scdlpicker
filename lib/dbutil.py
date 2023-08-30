@@ -133,15 +133,11 @@ def loadPicksForTimespan(query, startTime, endTime,
     return objects
 
 
-def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
+def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query, keepManualPicks=True):
     etime = origin.time().value()
     elat = origin.latitude().value()
     elon = origin.longitude().value()
     edep = origin.depth().value()
-
-    # Clear all arrivals
-    while origin.arrivalCount():
-        origin.removeArrival(0)
 
     # Uses the iasp91 tables by default
     ttt = seiscomp.seismology.TravelTimeTable()
@@ -159,7 +155,7 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
     # we searched globally for a large time window. We need to focus on the
     # interesting picks, now based on theoretical travel times.
 
-    interesting_picks = dict()
+    picks_of_interest = dict()
     for pickID in picks:
         pick = picks[pickID]
         nslc = _util.nslc(pick)
@@ -187,9 +183,9 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
         if not -4*_defaults.maxResidual < dt < 4*_defaults.maxResidual:
             continue
 
-        interesting_picks[pickID] = pick
+        picks_of_interest[pickID] = pick
 
-    picks = interesting_picks
+    picks = picks_of_interest
 
     # We can have duplicate DL picks for any stream (nslc) but we
     # only want one pick per nslc.
@@ -201,14 +197,49 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
             picks_per_nslc[nslc] = []
         picks_per_nslc[nslc].append(pick)
 
-    result = []
     for nslc in picks_per_nslc:
-        # the first pick per nslc # TODO: review
-        sorted_picks = sorted(
+        picks_per_nslc[nslc] = sorted(
             picks_per_nslc[nslc],
             key=lambda p: p.creationInfo().creationTime())
-        pick = sorted_picks[0]
+
+    _util.clearAllArrivals(origin)
+    query.loadArrivals(origin)
+    associated_picks = dict()
+    for pick in query.getPicks(origin.publicID()):
+        pick = seiscomp.datamodel.Pick.Cast(pick)
+        if not pick:
+            continue
+        associated_picks[pick.publicID()] = pick
+
+    if keepManualPicks:
+        _util.clearAutomaticArrivals(origin)
+        manual_picks = dict()
+        # This list contains stream ID and phase code of manual picks.
+        # This is used to block DL picks from streams for which we have a
+        # manual pick for the same phase type.
+        stream_phase_list = []
+        for arr in _util.ArrivalIterator(origin):
+            pickID = arr.pickID()
+            pick = associated_picks[pickID]
+            manual_picks[pickID] = pick
+            stream_phase_list.append( (pick.waveformID(), arr.phase().code()) )
+
+        # Find the right picks and associate them to the origin
+        picks = list(manual_picks.values())
+    else:
+        _util.clearAllArrivals(origin)
+        picks = list()
+
+
+    for nslc in picks_per_nslc:
+        # Take the first-created pick per nslc
+        # TODO: review
+        pick = picks_per_nslc[nslc][0]
         pickID = pick.publicID()
+
+        # If we already have a P pick for that stream...
+        if (pick.waveformID(), "P") in stream_phase_list:
+            continue
 
         n, s, l, c = nslc
         try:
@@ -231,13 +262,13 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
         theo = etime + seiscomp.core.TimeSpan(ptime.time)
         dt = float(pick.time().value() - theo)
 
-        # initially we grab more picks than within the final
+        # Initially we grab more picks than within the final
         # residual range and trim the residuals later.
         if not -2*_defaults.maxResidual < dt < 2*_defaults.maxResidual:
             print(pickID, "---", dt)
             continue
 
-        result.append(pick)
+        picks.append(pick)
 
         phase = seiscomp.datamodel.Phase()
         phase.setCode("P")
@@ -254,4 +285,4 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query):
         if not seiscomp.datamodel.Pick.Find(pickID):
             seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
 
-    return origin, result
+    return origin, picks

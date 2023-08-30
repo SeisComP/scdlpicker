@@ -318,6 +318,30 @@ def qualified(origin):
     return True
 
 
+def clearAllArrivals(origin):
+    while origin.arrivalCount():
+        origin.removeArrival(0)
+
+
+def clearAutomaticArrivals(origin):
+    pos = 0
+    while origin.arrivalCount() > pos:
+        arr = origin.arrival(pos)
+        pickID = arr.pickID()
+        pick = seiscomp.datamodel.Pick.Find(pickID)
+        if arr.weight() > 0.1 and pick is not None and manual(pick):
+            # skip removal of arrival
+            pos += 1
+            continue
+        origin.removeArrival(pos)
+
+    # logging
+    for arr in ArrivalIterator(origin):
+        phase = arr.phase().code()
+        pickID = arr.pickID()
+        seiscomp.logging.debug("Keeping manual " + phase + " pick " + pickID)
+
+
 def creationInfo(author, agencyID, creationTime=None):
     if not creationTime:
         now = seiscomp.core.Time.GMT()
