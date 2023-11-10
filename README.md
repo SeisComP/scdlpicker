@@ -41,9 +41,11 @@ A simple relocator for SeisComP, to be used on the command line. For a given eve
 
 ## Installation
 
-To install, you simply run `python setup.py install`. Note: there is no uninstall script.
+To install, you simply run `python setup.py install`.
 
 You need to have installed SeisBench previously.
+
+Note that there is no uninstall script.
 
 
 ## Disclaimer

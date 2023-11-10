@@ -70,6 +70,9 @@ def trimLargestResidual(origin, maxResidual):
         if abs(arr.timeResidual()) > abs(largest.timeResidual()):
             largest = arr
 
+    if largest is None:
+        return False
+
     largestResidual = abs(largest.timeResidual())
     seiscomp.logging.debug("largest residual %5.2f s" % largestResidual)
     if largestResidual > maxResidual:

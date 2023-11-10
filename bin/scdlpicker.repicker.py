@@ -17,7 +17,7 @@
 # https://www.gnu.org/licenses/agpl-3.0.html.                             #
 ###########################################################################
 
-import os
+import pathlib
 import yaml
 import time
 import logging
@@ -30,9 +30,13 @@ import obspy
 # Here is the place to import other DL models
 from seisbench.models import EQTransformer, PhaseNet
 
-MODEL_MAP = {
+models = {
     'phasenet': PhaseNet,
     'eqtransformer': EQTransformer,
+
+    # short names for convenience
+    'phn': PhaseNet,
+    'eqt': EQTransformer,
 }
 
 LOGFORMAT = "%(levelname)-8s  %(asctime)s %(message)s"
@@ -82,10 +86,7 @@ class Repicker:
     The refined picks are written into YAML files inside `outgoing/`.
 
     Args:
-        eventroot_d(str): Directory containing event folders, used to
-                           store annotations.
-
-        spool_d(str): Directory to watch for links to yaml files
+        workingDir(str): Directory containing input, output and waveform files.
 
         test(bool): To test the main functionality, stops before writing
                     outgoing files
@@ -96,26 +97,24 @@ class Repicker:
         device(str): Defines where to run the model - "cpu" or "gpu"
     """
 
-    def __init__(self, model_name=None, dataset="geofon",
-                 working_d=".", eventroot_d="events", spool_d="spool",
+    def __init__(self, model_name=None, dataset="geofon", workingDir=".",
                  test=False, single_run=False, batch_size=False, device="cpu",
-                 min_confidence=0.4, annot_d="annot"):
+                 min_confidence=0.4):
 
-        if model_name not in MODEL_MAP:
+        if model_name not in models:
             raise ValueError("No such model: " + model_name)
 
-        self.model = MODEL_MAP[model_name].from_pretrained(dataset)
+        self.model = models[model_name].from_pretrained(dataset)
         self.model_name = model_name
 
         self.test = test
         self.single_run = single_run
-        self.working_d = working_d
-        self.eventroot_d = eventroot_d
-        self.spool_d = spool_d
+        self.workingDir = workingDir
+        self.eventRootDir = workingDir / "events"
+        self.spoolDir = workingDir / "spool"
         self.batch_size = batch_size
         self.workspaces = dict()
         self.min_confidence = min_confidence
-        self.annot_d = annot_d
 
         if device == "cpu":
             self.model.cpu()
@@ -138,7 +137,6 @@ class Repicker:
         # Collect streams from mseed files
         collected_picks = []
         stream = obspy.core.stream.Stream()
-        eventroot_d = self.eventroot_d
         for pick in picks:
             pick: Pick
             pickID = pick.publicID
@@ -150,13 +148,13 @@ class Repicker:
 
             # Create an obspy stream from according mseed files
 
-            waveforms_d = os.path.join(eventroot_d, eventID, "waveforms")
+            waveformsDir = self.eventRootDir / eventID / "waveforms"
 
             files = []
             for components in [("Z",), ("N", "1"), ("E", "2")]:
                 for c in components:
-                    file = os.path.join(waveforms_d, nslc + c + ".mseed")
-                    if os.path.exists(file):
+                    file = waveformsDir / (nslc + c + ".mseed")
+                    if file.exists():
                         break
                 else:
                     file = None
@@ -308,28 +306,25 @@ class Repicker:
 
         return new_picks
 
-    def _findSpoolItems(self):
-        d = self.spool_d
-        filenames = [i for i in os.listdir(d) if i.endswith(".yaml")]
+    def _spoolItems(self):
+        d = self.spoolDir
+        filenames = [i for i in d.glob("*.yaml")]
         items = list()
-        for filename in sorted(filenames):
-            path = os.path.join(d, filename)
-
-            if os.path.islink(path):
-                target = os.readlink(path)
-                target = os.path.join(d, target)
-                if not os.path.exists(target):
+        for path in sorted(filenames):
+            if path.is_symlink():
+                target = path.readlink()
+                if not target.exists():
                     logger.warning("missing " + target)
                     continue
 
                 items.append( (path, target) )
         return items
 
-    def _readPicksFromYaml(self, yamlfilename):
-        with open(yamlfilename) as yamlfile:
+    def _readPicksFromYaml(self, yamlFileName):
+        with open(yamlFileName) as f:
             streamIDs = []
             picks = list()
-            for p in yaml.safe_load(yamlfile):
+            for p in yaml.safe_load(f):
                 # Prevent duplicate stream IDs
                 streamID = p["streamID"]
                 duplicateStreamID = streamID in streamIDs
@@ -344,10 +339,10 @@ class Repicker:
                 picks.append(pick)
             return picks
 
-    def _writePicksToYaml(self, picks, yamlfilename):
+    def _writePicksToYaml(self, picks, yamlFileName):
         tmp = [ dict(pick) for pick in picks ]
-        with open(yamlfilename, 'w') as yamlfile:
-            yaml.dump(tmp, yamlfile)
+        with open(yamlFileName, 'w') as f:
+            yaml.dump(tmp, f)
 
     def _poll(self, reverse=True):
         """
@@ -360,22 +355,18 @@ class Repicker:
             - process the event parameters
             - if successful and not in test mode, remove symlink
         """
-        try:
-            os.makedirs(self.spool_d)
-        except FileExistsError:
-            pass
+        self.spoolDir.mkdir(parents=True, exist_ok=True)
 
-        spooled = self._findSpoolItems()
-
-        # By reversing the list, we prioritize the last-added
-        # items. This is good if after a long outage we want to be
-        # in real-time mode quickly. But on the other hand the most
+        # We prioritize the last-added spool items.
+        #
+        # This is good if after a long outage we want to be in
+        # real-time mode quickly. But on the other hand the most
         # recent items are also usually the biggest and take
         # longest. Need to test if that has no unwanted side
         # effects. Possibly slight delays in real-time mode as
         # bigger items are prioritized, which take longer to
         # process. Or we divide big items into smaller ones. TBD
-        for item in sorted(spooled, reverse=reverse):
+        for item in sorted(self._spoolItems(), reverse=reverse):
             link, target = item
 
             logger.debug("+++reading %s" % target)
@@ -387,7 +378,7 @@ class Repicker:
             # so the eventID is always at a fixed position in the
             # path. This is required.
             assert target.endswith(".yaml")
-            eventID = target.split("/")[-3]
+            eventID = str(target).split("/")[-3]
 
             try:
                 logger.info("PROCESS begin")
@@ -399,39 +390,34 @@ class Repicker:
 
             if not new_picks:
                 logging.warning("no results - exiting")
-                os.remove(link)
+                link.unlink()
                 continue
 
             if self.test:
                 logger.info("+++test mode - stopping")
                 continue
 
-            event_d = os.path.join(self.eventroot_d, eventID)
+            eventDir = self.eventRootDir / eventID
             # directory to which we write the resulting yaml files
-            out_d = os.path.join(event_d, "out")
+            outDir = eventDir / "out"
+            outDir.mkdir(parents=True, exist_ok=True)
+            yamlFileName = outDir / link.name
+            self._writePicksToYaml(new_picks, yamlFileName)
 
-            outgoing_d = os.path.join(self.working_d, "outgoing")
+            outgoingDir = self.workingDir / "outgoing"
+            outgoingDir.mkdir(parents=True, exist_ok=True)
 
-            os.makedirs(outgoing_d, exist_ok=True)
-
-            d, f = os.path.split(link)
-
-            os.makedirs(out_d, exist_ok=True)
-            yamlfilename = os.path.join(out_d, f)
-            self._writePicksToYaml(new_picks, yamlfilename)
-
-            dst = os.path.join(outgoing_d, f)
-            # TODO: clean up!
-            src = os.path.join("..", self.eventroot_d, eventID, "out", f)
+            dst = outgoingDir / yamlFileName.name
+            src = yamlFileName
 
             try:
                 logging.debug("creating symlink %s -> %s" % (dst, src))
-                os.symlink(src, dst)
+                dst.symlink_to(src)
             except FileExistsError:
                 logging.warning("symlink  %s -> %s" % (dst, src))
 
             # we are done with this item
-            os.remove(link)
+            link.unlink()
 
             # If in reverse mode, break after first processed item
             # in order to check if there are new items, which will
@@ -454,7 +440,7 @@ class Repicker:
         return True
 
     def fill_result(self, predictions, stream, collected_picks,
-                    annot_d, eventID):
+                    annotDir, eventID):
         """Fills `predictions` with annotations done by the model
            using the stream. Additional data will be taken from
            `collected_picks`.
@@ -502,8 +488,9 @@ class Repicker:
                     continue
 
                 assoc_ind.append(i)
-                annot_f = os.path.join(annot_d, dotted_nslc(pick) + ".sac")
-                annotation.write(annot_f, format="SAC")
+                annot_f = annotDir / (dotted_nslc(pick) + ".sac")
+                print(annot_f)
+                annotation.write(str(annot_f), format="SAC")
 
                 confidence = annotation.data.astype(np.double)
                 times = annotation.times()
@@ -552,9 +539,8 @@ class Repicker:
 
         logger.debug("Starting prediction")
 
-        annot_d = os.path.join(
-            self.eventroot_d, eventID, self.annot_d)
-        os.makedirs(annot_d, exist_ok=True)
+        annotDir = self.eventRootDir / eventID / "annot"
+        annotDir.mkdir(parents=True, exist_ok=True)
 
         acc_predictions = {}
         picks_remain_size = picks_all_size = len(adhoc_picks)
@@ -581,7 +567,7 @@ class Repicker:
                 # next batch could be ok, therefore we just need to pass
                 # the following line
                 self.fill_result(
-                    acc_predictions, stream, collected_picks, annot_d, eventID)
+                    acc_predictions, stream, collected_picks, annotDir, eventID)
 
             # Prepare for next batch
             picks_remain_size -= self.batch_size
@@ -594,20 +580,14 @@ class Repicker:
         return acc_predictions
 
 
-##########################################################################
-
-# Providing strings for the available picker model classes that can be
-# used as arguments for the script
-
 if __name__ == '__main__':
-    models = list(MODEL_MAP.keys())
+    modelnames = list(models.keys())
     parser = argparse.ArgumentParser(
         description='SeicComp Client - ML Repicker using SeisBench')
     parser.add_argument(
-        '--model', choices=models, default=models[0], dest='model_name',
-        help="Choose one of the available ML models to make the predictions."
-             " Note that if the model is not cached, it might take a "
-             "little while to download the weights file.")
+        '--model', choices=modelnames, default=modelnames[0], type=str.lower,
+	dest='model_choice',
+        help="Choose one of the available ML models to make the predictions.")
     parser.add_argument(
         '--test', action='store_true',
         help="Test mode - don't write outgoing yaml with refined picks.")
@@ -622,22 +602,8 @@ if __name__ == '__main__':
         '--device', choices=['cpu', 'gpu'], default='cpu',
         help="With access to a cuda device change this parameter to 'gpu'.")
     parser.add_argument(
-        '--working-dir', type=str, default='.', dest='working_d',
+        '--working-dir', type=str, default='.', dest='workingDir',
         help="Working directory where all files are placed and exchanged")
-    parser.add_argument(
-        '--event-dir', type=str, default='', dest='eventroot_d',
-        help="Where to look for event folders with waveforms and picks and "
-             "where to store annotations per each event")
-    parser.add_argument(
-        '--spool-dir', type=str, default='', dest='spool_d',
-        help="Where to look for new symlinks to YAML files that can be "
-             "processed by the repicker.")
-    parser.add_argument(
-        '--annot-dir', type=str, default="annot", dest='annot_d',
-        help="Where to write the annotations to, inside events/<event>/.")
-    parser.add_argument(
-        '--outgoing-dir', type=str, default='', dest='outgoing_d',
-        help="outgoing directory where all result files are written")
     parser.add_argument(
         '--dataset', type=str, default='geofon', dest='dataset',
         help="The dataset on which the model was predicted [geofon].")
@@ -646,23 +612,15 @@ if __name__ == '__main__':
         help="Confidence threshold below which a pick is skipped [0.3]")
     args = parser.parse_args()
 
-    if not args.eventroot_d:
-        args.eventroot_d = os.path.join(args.working_d, "events")
-    if not args.spool_d:
-        args.spool_d = os.path.join(args.working_d, "spool")
-#   if not args.outgoing_d:
-#       args.outgoing_d = os.path.join(args.working_d, "outgoing")
+    workingDir = pathlib.Path(args.workingDir).expanduser()
 
     repicker = Repicker(
-        model_name=args.model_name,
+        model_name=args.model_choice.lower(),
         dataset=args.dataset,
         test=args.test,
         single_run=args.single_run,
         batch_size=args.batch_size,
-        working_d=args.working_d,
-        eventroot_d=args.eventroot_d,
-        spool_d=args.spool_d,
-        annot_d=args.annot_d,
+        workingDir = workingDir,
         device=args.device,
         min_confidence=args.min_confidence
     )

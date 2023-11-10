@@ -16,7 +16,7 @@
 ###########################################################################
 
 import sys
-import os
+import pathlib
 import numpy
 import seiscomp.core
 import seiscomp.client
@@ -43,18 +43,8 @@ agency = "GFZ"
 # long!
 streamTimeout = 5
 
-# This is the directory where all the event data are written to.
-workingDir = "."
-
-# This is the directory where all the event data are written to.
-eventRootDir = "events"
-
-# This is the directory in which we create symlinks pointing to
-# data we need to work on.
-spoolDir = "spool"
-
-# This is the directory in which results are placed by the repicker
-outgoingDir = "outgoing"
+# This is the working directory where all the event data are written to.
+workingDir = "~/scdlpicker"
 
 # ignore objects (picks, origins) from these authors
 ignoredAuthors = [ "dl-reloc", author ]
@@ -104,9 +94,6 @@ def isRepick(pick):
     Is this already a repick?
     """
 
-#   if pick.publicID().endswith("/repicked"):
-#       return True
-
     methodIDs = ["DL", "PhaseNet", "PHN", "EQTransformer", "EQT"]
     try:
         if pick.methodID() in methodIDs:
@@ -151,10 +138,6 @@ class App(seiscomp.client.Application):
     def __init__(self, argc, argv):
         # adopt the defaults from the top of this script
         self.workingDir = None
-        self.eventRootDir = None
-        self.spoolDir = None
-        self.outgoingDir = None
-        self.sentDir = None
 
         self.ignoredAuthors = ignoredAuthors
         self.ignoredAgencyIDs = ignoredAgencyIDs
@@ -188,63 +171,38 @@ class App(seiscomp.client.Application):
             return False
 
         try:
-            self.workingDir = self.configGetString("mlpicker.workingDir")
+            self.workingDir = self.configGetString("scdlpicker.workingDir")
         except RuntimeError:
             self.workingDir = None
 
         try:
-            self.eventRootDir = self.configGetString("mlpicker.eventRootDir")
-        except RuntimeError:
-            self.eventRootDir = None
-
-        try:
-            self.spoolDir = self.configGetString("mlpicker.spoolDir")
-        except RuntimeError:
-            self.spoolDir = None
-
-        try:
-            self.outgoingDir = self.configGetString("mlpicker.outgoingDir")
-        except RuntimeError:
-            self.outgoingDir = None
-
-        try:
-            self.sentDir = self.configGetString("mlpicker.sentDir")
-        except RuntimeError:
-            self.sentDir = None
-
-        try:
             self.ignoredAuthors = \
-                self.configGetStrings("mlpicker.ignoredAuthors")
+                self.configGetStrings("scdlpicker.ignoredAuthors")
         except RuntimeError:
             self.ignoredAuthors = ignoredAuthors
 
         try:
             self.ignoredAgencyIDs = \
-                self.configGetStrings("mlpicker.ignoredAgencyIDs")
+                self.configGetStrings("scdlpicker.ignoredAgencyIDs")
         except RuntimeError:
             self.ignoredAgencyIDs = ignoredAgencyIDs
 
         try:
             self.emptyOriginAgencyIDs = \
-                self.configGetStrings("mlpicker.emptyOriginAgencyIDs")
+                self.configGetStrings("scdlpicker.emptyOriginAgencyIDs")
         except RuntimeError:
             self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
 
         try:
             self.tryUpickedStations = \
-                self.configGetBool("mlpicker.tryUpickedStations")
+                self.configGetBool("scdlpicker.tryUpickedStations")
         except RuntimeError:
             self.tryUpickedStations = tryUpickedStations
         return True
 
     def dumpConfiguration(self):
         info = seiscomp.logging.info
-        info("workingDir = " + self.workingDir)
-        info("eventRootDir = " + self.eventRootDir)
-        info("spoolDir = " + self.spoolDir)
-        info("outgoingDir = " + self.outgoingDir)
-        info("sentDir = " + self.sentDir)
-
+        info("workingDir = " + str(self.workingDir))
         info("ignoredAuthors = " + str(self.ignoredAuthors))
         info("ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
         info("emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
@@ -272,6 +230,8 @@ class App(seiscomp.client.Application):
             self.workingDir = self.commandline().optionString("working-dir")
         except RuntimeError:
             pass
+        else:
+            self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
         self.setMessagingEnabled(True)
         if not self.commandline().hasOption("event"):
@@ -282,37 +242,18 @@ class App(seiscomp.client.Application):
             self.addMessagingSubscription("LOCATION")
             self.addMessagingSubscription("EVENT")
 
-        try:
-            self.eventRootDir = self.commandline().optionString("event-dir")
-        except RuntimeError:
-            pass
+        # This is the directory where all the event data are written to.
+        self.eventRootDir = self.workingDir / "events"
 
-        try:
-            self.spoolDir = self.commandline().optionString("spool-dir")
-        except RuntimeError:
-            pass
+        # This is the directory in which we create symlinks pointing to
+        # data we need to work on.
+        self.spoolDir = self.workingDir / "spool"
 
-        try:
-            self.outgoingDir = self.commandline().optionString("outgoing-dir")
-        except RuntimeError:
-            pass
+        # This is the directory in which results are placed by the repicker
+        self.outgoingDir = self.workingDir / "outgoing"
 
-        try:
-            self.sentDir = self.commandline().optionString("sent-dir")
-        except RuntimeError:
-            pass
-
-        if not self.eventRootDir:
-            self.eventRootDir = os.path.join(self.workingDir, "events")
-
-        if not self.spoolDir:
-            self.spoolDir = os.path.join(self.workingDir, "spool")
-
-        if not self.outgoingDir:
-            self.outgoingDir = os.path.join(self.workingDir, "outgoing")
-
-        if not self.sentDir:
-            self.sentDir = os.path.join(self.workingDir, "sent")
+        # After sending the data to the messaging, the file is move to here.
+        self.sentDir = self.workingDir / "sent"
 
         return True
 
@@ -368,12 +309,12 @@ class App(seiscomp.client.Application):
         seiscomp.datamodel.Notifier.Disable()
         if connection.send(msg):
             for pickID in picks:
-                seiscomp.logging.info("sent "+pickID)
+                seiscomp.logging.info("sent " + pickID)
             seiscomp.logging.info("sent %d picks" % (len(picks),))
             return True
         else:
             for pickID in picks:
-                seiscomp.logging.info("failed to send "+pickID)
+                seiscomp.logging.info("failed to send " + pickID)
             return False
 
     def handleTimeout(self):
@@ -392,9 +333,8 @@ class App(seiscomp.client.Application):
             for yamlfile in repickerResults:
                 picks, comments = _util.readRepickerResults(yamlfile)
                 if self.sendRepickerResults(picks, comments):
-                    d, f = os.path.split(yamlfile)
-                    sent = os.path.join(self.sentDir, f)
-                    os.rename(yamlfile, sent)
+                    sent = self.sentDir / yamlfile.name
+                    yamlfile.rename(sent)
 
     def processPendingEvents(self):
         for eventID in sorted(self.pendingEvents.keys()):
@@ -471,7 +411,7 @@ class App(seiscomp.client.Application):
         # if necessary, create some needed folders at startup
         for d in [self.eventRootDir, self.spoolDir,
                   self.outgoingDir, self.sentDir]:
-            os.makedirs(d, exist_ok=True)
+            d.mkdir(parents=True, exist_ok=True)
 
     def _loadEvent(self, publicID):
         return _dbutil.loadEvent(self.query(), publicID)
@@ -499,9 +439,8 @@ class App(seiscomp.client.Application):
             # avoid requesting data that we have saved already
             eventID = event.publicID()
             key = "%s.%s.%s.%s" % (net, sta, loc, cha)
-            mseedFileName = os.path.join(
-                self.eventRootDir, eventID, key + ".mseed")
-            if os.path.exists(mseedFileName):
+            mseedFileName = self.eventRootDir / eventID / (key + ".mseed")
+            if mseedFileName.exists():
                 # TODO: Check data completeness, otherwise do request
                 continue
 
@@ -654,7 +593,7 @@ class App(seiscomp.client.Application):
                 return True
 
             self.processOrigin(origin, event)
-            workspace.dump()
+            workspace.dump(self.eventRootDir)
 
         return True
 
@@ -669,7 +608,6 @@ class App(seiscomp.client.Application):
         self.addObject(parentID, obj)
 
     def cleanup(self, timeout=30*3600):
-        # timeout = 86400 # one day
         now = seiscomp.core.Time.GMT()
         tmin = now-seiscomp.core.TimeSpan(timeout)
         blacklist = []

@@ -16,7 +16,6 @@
 ###########################################################################
 
 
-import os
 import sys
 import math
 import yaml
@@ -444,10 +443,7 @@ def pollRepickerResults(resultsDir):
 
     yamlfilenames = list()
 
-    for item in os.listdir(resultsDir):
-        if not item.endswith(".yaml"):
-            continue
-        yamlfilename = os.path.join(resultsDir, item)
+    for yamlfilename in resultsDir.glob("*.yaml"):
         yamlfilenames.append(yamlfilename)
 
     return yamlfilenames

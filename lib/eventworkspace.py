@@ -16,7 +16,6 @@
 ###########################################################################
 
 
-import os
 import yaml
 import seiscomp.core
 import seiscomp.datamodel
@@ -47,7 +46,7 @@ class EventWorkspace:
         # but have not received
         # self.pending = dict()
 
-    def writePicksToYAML(self, yamlFileName):
+    def _writePicksToYAML(self, yamlFileName):
         picks = []
         for key in self.all_picks:
             pick = self.all_picks[key]
@@ -66,22 +65,21 @@ class EventWorkspace:
         with open(yamlFileName, 'w') as file:
             yaml.dump(picks, file)
 
-    def writeWaveformsToMiniSeed(self, eventRootDir="events", overwrite=True):
+    def _writeWaveformsToMiniSeed(self, eventRootDir="events", overwrite=True):
         eventID = self.event.publicID()
-        eventDir = os.path.join(eventRootDir, eventID, "waveforms")
-        if not os.path.exists(eventDir):
-            os.makedirs(eventDir)
+        waveformsDir = eventRootDir / eventID / "waveforms"
+        waveformsDir.mkdir(parents=True, exist_ok=True)
         for key in self.waveforms:
-            mseedFileName = os.path.join(eventDir, key+".mseed")
+            mseedFileName = waveformsDir / (key+".mseed")
             # We normally do want to overwrite data because there
             # may be additional records now.
-            if os.path.exists(mseedFileName) and not overwrite:
+            if mseedFileName.exists() and not overwrite:
                 continue
             with open(mseedFileName, "wb") as f:
                 for rec in self.waveforms[key]:
                     f.write(rec.raw().str())
 
-    def dump(self, eventRootDir="events", spoolDir="spool"):
+    def dump(self, eventRootDir, spoolDir="spool"):
         """
         Dump the picks to YAML. Note that in a real-time
         processing this is an evolution with potentially
@@ -99,30 +97,28 @@ class EventWorkspace:
         assert self.event
 
         eventID = self.event.publicID()
-        eventDir = os.path.join(eventRootDir, eventID)
-        yamlInputDir = os.path.join(eventDir, "in")
+        eventDir = eventRootDir / eventID
+        yamlInputDir = eventDir / "in"
 
-        os.makedirs(yamlInputDir, exist_ok=True)
-        os.makedirs(eventDir, exist_ok=True)
+        yamlInputDir.mkdir(parents=True, exist_ok=True)
+        eventDir.mkdir(parents=True, exist_ok=True)
 
         # first dump waveforms
-        self.writeWaveformsToMiniSeed(eventRootDir=eventRootDir)
+        self._writeWaveformsToMiniSeed(eventRootDir=eventRootDir)
 
         # then dump yaml
         timestamp = isotimestamp(self.origin.creationInfo().creationTime())
-        yamlFileName = os.path.join(yamlInputDir, "%s.yaml" % timestamp)
-        self.writePicksToYAML(yamlFileName)
+        yamlFileName = yamlInputDir / ("%s.yaml" % timestamp)
+        self._writePicksToYAML(yamlFileName)
 
         # finally create spool symlink
-        os.makedirs(spoolDir, exist_ok=True)
-        dst = os.path.join(spoolDir, "%s.yaml" % timestamp)
-        # TODO: clean up!
-        src = os.path.join("..", eventRootDir, eventID, "in",
-                           "%s.yaml" % timestamp)
+        spoolDir.mkdir(parents=True, exist_ok=True)
+        dst = spoolDir / yamlFileName.name
+        src = yamlFileName
 
         try:
             seiscomp.logging.debug("creating symlink %s -> %s" % (dst, src))
-            os.symlink(src, dst)
+            dst.symlink_to(src)
         except FileExistsError:
             seiscomp.logging.warning("symlink exists %s -> %s" % (dst, src))
 
