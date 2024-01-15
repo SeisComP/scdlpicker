@@ -39,6 +39,10 @@ import scdlpicker.dbutil as _dbutil
 import scdlpicker.util as _util
 import scdlpicker.relocation as _relocation
 import scdlpicker.defaults as _defaults
+import scdlpicker.depth as _depth
+
+# FIXME: not here
+_depth.initDepthModel()
 
 
 def quality(origin):
