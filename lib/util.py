@@ -485,9 +485,9 @@ def readRepickerResults(path):
             wfid.setChannelCode(cha)
 
             model = p["model"].lower()
-            if model == "eqtransformer":
+            if model in ["eqt", "eqtransformer"]:
                 mth = "EQT"
-            elif model == "phasenet":
+            elif model in ["phn", "phasenet"]:
                 mth = "PHN"
             else:
                 mth = "XYZ"

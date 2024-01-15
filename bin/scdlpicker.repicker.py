@@ -314,7 +314,7 @@ class Repicker:
             if path.is_symlink():
                 target = path.readlink()
                 if not target.exists():
-                    logger.warning("missing " + target)
+                    logger.warning("missing %s" % target)
                     continue
 
                 items.append( (path, target) )
@@ -377,13 +377,11 @@ class Repicker:
             # /some/folder/name/eventID/in/oneOutOfMany.yaml
             # so the eventID is always at a fixed position in the
             # path. This is required.
-            assert target.endswith(".yaml")
+            assert str(target).endswith(".yaml")
             eventID = str(target).split("/")[-3]
 
             try:
-                logger.info("PROCESS begin")
                 new_picks = self._process(adhoc_picks, eventID)
-                logger.info("PROCESS end")
             except RuntimeError as e:
                 logger.warning(str(e))
                 continue
