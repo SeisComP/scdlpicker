@@ -28,6 +28,7 @@ This is a very simple online relocator that
 
 
 import sys
+import pathlib
 import seiscomp.core
 import seiscomp.client
 import seiscomp.datamodel
@@ -45,7 +46,7 @@ def quality(origin):
     return _util.arrivalCount(origin)  # to be improved
 
 
-class RelocatorApp(seiscomp.client.Application):
+class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
         seiscomp.client.Application.__init__(self, argc, argv)
@@ -58,6 +59,7 @@ class RelocatorApp(seiscomp.client.Application):
 
         self.minimumDepth = _defaults.minimumDepth
         self.maxResidual = _defaults.maxResidual
+        self.minDelay = 18*60
 
         self.allowedAuthorIDs = _defaults.allowedAuthorIDs
 
@@ -98,13 +100,44 @@ class RelocatorApp(seiscomp.client.Application):
             "limit the individual pick residual to the specified value "
             "(in seconds)")
         self.commandline().addDoubleOption(
+            "Target", "min-delay",
+            "Minimum delay (in seconds) after origin time before a relocation "
+            "is attempted")
+        self.commandline().addDoubleOption(
             "Target", "max-rms",
             "limit the pick residual RMS to the specified value (in seconds)")
         self.commandline().addOption(
             "Target", "test", "test mode - don't send the result")
 
+    def initConfiguration(self):
+        # Called BEFORE validateParameters()
+
+        if not super(App, self).initConfiguration():
+            return False
+
+        try:
+            self.minDelay = self.configGetDouble("scdlpicker.minDelay")
+        except RuntimeError:
+            pass
+
+        return True
+
+    def validateParameters(self):
+        """
+        Command-line parameters
+        """
+        if not super(App, self).validateParameters():
+            return False
+
+        try:
+            self.minDelay = self.commandline().optionString("min-delay")
+        except RuntimeError:
+            pass
+
+        return True
+
     def init(self):
-        if not super(RelocatorApp, self).init():
+        if not super(App, self).init():
             return False
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
@@ -158,7 +191,13 @@ class RelocatorApp(seiscomp.client.Application):
                 self.processEvent(eventID)
         # seiscomp.logging.debug("kickOffProcessing   end " + eventID)
 
-    def readyToProcess(self, eventID, minDelay=1080):
+    def readyToProcess(self, eventID):
+        """
+        Before relocation we wait some time (minDelay, in seconds) to allow
+        collection of all required picks. This delay differs depending on the
+        network size; the default is 18 min. for global monitoring, i.e. it
+        is waited until practically all P picks are usually available.
+        """
         if eventID not in self.pendingEvents:
             seiscomp.logging.error("Missing event "+eventID)
             return False
@@ -175,7 +214,7 @@ class RelocatorApp(seiscomp.client.Application):
         org = self.origins[preferredOriginID]
         now = seiscomp.core.Time.GMT()
         dt = float(now - org.time().value())
-        if dt < minDelay:
+        if dt < self.minDelay:
             return False
 
         try:
@@ -346,6 +385,15 @@ class RelocatorApp(seiscomp.client.Application):
 
         self.relocated[eventID] = relocated
 
+        # FIXME:
+        workingDir = pathlib.Path("~/scdlpicker").expanduser()
+        try:
+            depth = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
+            seiscomp.logging.info("DEPTH=%.1f" % depth)
+        except:
+            pass
+
+
     def run(self):
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
@@ -388,10 +436,10 @@ class RelocatorApp(seiscomp.client.Application):
 
         # enter online mode
         self.enableTimer(1)
-        return super(RelocatorApp, self).run()
+        return super(App, self).run()
 
 
 if __name__ == "__main__":
-    app = RelocatorApp(len(sys.argv), sys.argv)
+    app = App(len(sys.argv), sys.argv)
     status = app()
     sys.exit(status)
