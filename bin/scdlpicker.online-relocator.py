@@ -40,6 +40,7 @@ import scdlpicker.util as _util
 import scdlpicker.relocation as _relocation
 import scdlpicker.defaults as _defaults
 import scdlpicker.depth as _depth
+import scstuff.dbutil
 
 # FIXME: not here
 _depth.initDepthModel()
@@ -396,14 +397,28 @@ class App(seiscomp.client.Application):
 
         self.relocated[eventID] = relocated
 
+        # Experimental depth computation. Logging only.
+        seiscomp.logging.debug("Computing depth for event " + eventID)
+        q = self.query()
+        ep = scstuff.dbutil.loadCompleteEvent(q, eventID, withPicks=True, preferred=True)
+
         # FIXME:
         workingDir = pathlib.Path("~/scdlpicker").expanduser()
         try:
-            depth = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
-            seiscomp.logging.info("DEPTH=%.1f" % depth)
+            depth = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True)
+            # depth = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
         except:
-            pass
+            depth = None
+        t = seiscomp.core.Time.GMT().toString("%F %T")
+        with open(workingDir / "depth.log", "a") as f:
+            if depth is not None:
+                seiscomp.logging.info("DEPTH=%.1f" % depth)
+                f.write("%s %s   %5.1f km\n" % (t, eventID, depth))
+            else:
+                seiscomp.logging.error("DEPTH COMPUTATION FAILED for "+eventID)
+                f.write("%s %s   depth computation failed\n" % (t, eventID))
 
+        
 
     def run(self):
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
