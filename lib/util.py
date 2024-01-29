@@ -353,6 +353,16 @@ def creationInfo(author, agencyID, creationTime=None):
     return ci
 
 
+def agencyID(origin):
+    """
+    Return the agency ID of the origin or None if unset.
+    """
+    try:
+        return origin.creationInfo().agencyID()
+    except ValueError:
+        return
+
+
 def configuredStreams(configModule, myName):
 
     # Determine which streams are configured for picking
