@@ -324,15 +324,22 @@ class App(seiscomp.client.Application):
 
         # adopt fixed depth according to incoming origin
         defaultDepth = 10.  # FIXME: no fixed 10 km here
-        if _util.hasFixedDepth(origin) \
-                and origin.depth().value() == defaultDepth:
+        fixedDepth = None
+#       if _util.hasFixedDepth(origin) \
+#               and origin.depth().value() == defaultDepth:
+        if _util.hasFixedDepth(origin):
             # fixed = True
-            fixedDepth = origin.depth().value()
-            seiscomp.logging.debug("setting fixed depth to %f km" % fixedDepth)
-        else:
-            # fixed = False
-            fixedDepth = None
+            if _util.agencyID(origin) == self.agencyID and _util.statusFlag(origin) == "M":
+                # At GFZ we trust the depth of manual GFZ origins. But ymmv!
+                fixedDepth = origin.depth().value()
+            elif origin.depth().value() == defaultDepth:
+                fixedDepth = defaultDepth
+
+        if fixedDepth is None:
             seiscomp.logging.debug("not fixing depth")
+            # fixed = False
+        else:
+            seiscomp.logging.debug("setting fixed depth to %f km" % fixedDepth)
 
         # Load all picks for a matching time span, independent of association.
         maxDelta = _defaults.maxDelta
