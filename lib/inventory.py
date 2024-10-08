@@ -26,8 +26,10 @@ def operational(obj, time):
     # known, it is not considered operational.
     try:
         start = obj.start()
-        assert time >= start
     except ValueError:
+        return False
+
+    if time < start:
         return False
 
     # If the end time of an inventory item is not
