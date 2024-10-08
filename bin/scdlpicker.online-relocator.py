@@ -46,6 +46,14 @@ def quality(origin):
     return _util.arrivalCount(origin)  # to be improved
 
 
+def getFixedDepth(origin):
+    # Quick hack for SW Poland copper mining region as a test.
+    # TODO: Configurable solution needed!
+    lat, lon = origin.latitude().value(), origin.longitude().value()
+    if 50 <= lat <= 52 and 15 <= lon <= 20:
+        return 1
+
+
 class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
@@ -147,6 +155,8 @@ class App(seiscomp.client.Application):
     def pingDB(self):
         """
         Keep the DB connection alive by making a dummy request every minute
+
+        This is a temporary workaround to prevent DB connection timeouts.
         """
         now = seiscomp.core.Time.GMT()
         if float(now - self._previousPingDB) > 60:
@@ -322,11 +332,16 @@ class App(seiscomp.client.Application):
             self.query(), event.preferredOriginID())
         seiscomp.logging.debug("Loaded origin " + origin.publicID())
 
-        # adopt fixed depth according to incoming origin
-        defaultDepth = 10.  # FIXME: no fixed 10 km here
-        fixedDepth = None
-#       if _util.hasFixedDepth(origin) \
-#               and origin.depth().value() == defaultDepth:
+        # Adopt fixed depth according to incoming origin
+
+        # Compute fixed depth according to region.
+        # E.g. regions with mostly induced seismicity.
+        fixedDepth = getFixedDepth(origin)
+        if fixedDepth is not None:
+            defaultDepth = fixedDepth
+        else:
+            defaultDepth = 10.
+
         if _util.hasFixedDepth(origin):
             # fixed = True
             if _util.agencyID(origin) == self.agencyID and _util.statusFlag(origin) == "M":
