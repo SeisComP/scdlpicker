@@ -16,6 +16,7 @@
 ###########################################################################
 
 import sys
+import time
 import pathlib
 import numpy
 import seiscomp.core
@@ -307,17 +308,20 @@ class App(seiscomp.client.Application):
 
         connection = self.connection()
 
-        # Use the same creationInfo for all new picks
-        now = seiscomp.core.Time.GMT()
-        ctime = now
-        ci = _util.creationInfo(author, agency, ctime)
-        for pickID in picks:
+        pickIDs = sorted(picks.keys())
+        for pickID in pickIDs:
+            # Set creation time for each pick with the goal of preventing
+            # exactly identical creation times.
+            time.sleep(0.0001)  # wait for 100 microseconds
+            now = seiscomp.core.Time.GMT()
+            ctime = now
+            ci = _util.creationInfo(author, agency, ctime)
             pick = picks[pickID]
             pick.setCreationInfo(ci)
 
         ep = seiscomp.datamodel.EventParameters()
         seiscomp.datamodel.Notifier.Enable()
-        for pickID in picks:
+        for pickID in pickIDs:
             pick = picks[pickID]
             # It is essential to first add the pick to the
             # EventParameters and then the comments to the pick.
@@ -330,7 +334,7 @@ class App(seiscomp.client.Application):
         msg = seiscomp.datamodel.Notifier.GetMessage()
         seiscomp.datamodel.Notifier.Disable()
         if connection.send(msg):
-            for pickID in picks:
+            for pickID in pickIDs:
                 seiscomp.logging.info("sent " + pickID)
             seiscomp.logging.info("sent %d picks" % (len(picks),))
             return True
