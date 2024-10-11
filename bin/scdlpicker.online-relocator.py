@@ -29,6 +29,7 @@ This is a very simple online relocator that
 
 import sys
 import pathlib
+import traceback
 import seiscomp.core
 import seiscomp.client
 import seiscomp.datamodel
@@ -39,6 +40,9 @@ import scdlpicker.dbutil as _dbutil
 import scdlpicker.util as _util
 import scdlpicker.relocation as _relocation
 import scdlpicker.defaults as _defaults
+import scdlpicker.depth as _depth
+import scstuff.dbutil
+
 
 
 def quality(origin):
@@ -68,6 +72,7 @@ class App(seiscomp.client.Application):
         self.minimumDepth = _defaults.minimumDepth
         self.maxResidual = _defaults.maxResidual
         self.minDelay = 18*60
+        self.device = "cpu"
 
         self.allowedAuthorIDs = _defaults.allowedAuthorIDs
 
@@ -96,6 +101,8 @@ class App(seiscomp.client.Application):
             "Config", "author", "Author of created objects")
         self.commandline().addStringOption(
             "Config", "agency", "Agency of created objects")
+        self.commandline().addStringOption(
+            "Config", "device", "'cpu' or 'gpu'. Default is 'cpu'.")
 
         self.commandline().addGroup("Target")
         self.commandline().addStringOption(
@@ -128,6 +135,11 @@ class App(seiscomp.client.Application):
         except RuntimeError:
             pass
 
+        try:
+            self.device = self.configGetString("scdlpicker.device")
+        except RuntimeError:
+            pass
+
         return True
 
     def validateParameters(self):
@@ -142,11 +154,19 @@ class App(seiscomp.client.Application):
         except RuntimeError:
             pass
 
+        try:
+            self.device = self.commandline().optionString("device")
+        except RuntimeError:
+            pass
+
         return True
 
     def init(self):
         if not super(App, self).init():
             return False
+
+        self.device = self.device.lower()
+        _depth.initDepthModel(device=self.device)
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
@@ -365,55 +385,107 @@ class App(seiscomp.client.Application):
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
-        relocated = _relocation.relocate(
-            originWithArrivals, eventID, fixedDepth,
-            self.minimumDepth, self.maxResidual)
-        if not relocated:
-            seiscomp.logging.warning("%s: relocation failed" % eventID)
-            return
-        if relocated.arrivalCount() < 5:
-            seiscomp.logging.info("%s: too few arrivals" % eventID)
-            return
+        relocated = None
+        depthFromDepthPhases = None
 
-        now = seiscomp.core.Time.GMT()
-        ci = _util.creationInfo(self.author, self.agencyID, now)
-        relocated.setCreationInfo(ci)
-        relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
-        self.origins[relocated.publicID()] = relocated
+        for attempt in ["direct", "depth phase based"]:
+#       for attempt in ["direct"]:
 
-        _util.summarize(relocated)
-        if eventID in self.relocated:
-            # if quality(relocated) <= quality(self.relocated[eventID]):
-            if not self.improvement(self.relocated[eventID], relocated):
-                seiscomp.logging.info(
-                    "%s: no improvement - origin not sent" % eventID)
+            if attempt == "depth phase based":
+                if relocated is None:
+                    # No successful relocation in previous run
+                    seiscomp.logging.debug("no depth phase based attempt")
+                    break
+                if depthFromDepthPhases is None:
+                    seiscomp.logging.debug("no depth phase based attempt")
+                    # Depth phase depth could not be determined in previous run
+                    break
+                if relocated.arrivalCount() < 50:
+                    seiscomp.logging.debug("no depth phase based attempt (too few picks)")
+                    # Don't enter 2nd round for small events. criteria t.b.d.
+                    break
+                if relocated.depth().value() > 120:
+                    seiscomp.logging.debug("no depth phase based attempt (depth > 120)")
+                    # temporarily
+                    break
+
+                # adopt the previous relocation result
+                originWithArrivals = relocated
+                fixedDepth = depthFromDepthPhases
+
+            relocated = _relocation.relocate(
+                originWithArrivals, eventID, fixedDepth,
+                self.minimumDepth, self.maxResidual)
+            if not relocated:
+                seiscomp.logging.warning("%s: relocation failed" % eventID)
+                return
+            if relocated.arrivalCount() < 5:
+                seiscomp.logging.info("%s: too few arrivals" % eventID)
                 return
 
-        ep = seiscomp.datamodel.EventParameters()
-        seiscomp.datamodel.Notifier.Enable()
-        ep.add(relocated)
-        event.add(seiscomp.datamodel.OriginReference(relocated.publicID()))
-        msg = seiscomp.datamodel.Notifier.GetMessage()
-        seiscomp.datamodel.Notifier.Disable()
+            now = seiscomp.core.Time.GMT()
+            ci = _util.creationInfo(self.author, self.agencyID, now)
+            relocated.setCreationInfo(ci)
+            relocated.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
+            self.origins[relocated.publicID()] = relocated
 
-        if self.commandline().hasOption("test"):
-            seiscomp.logging.info(
-                "test mode - not sending " + relocated.publicID())
-        else:
-            if self.connection().send(msg):
-                seiscomp.logging.info("sent " + relocated.publicID())
+            _util.summarize(relocated)
+
+            if attempt == "direct":
+                if eventID in self.relocated:
+                    # if quality(relocated) <= quality(self.relocated[eventID]):
+                    if not self.improvement(self.relocated[eventID], relocated):
+                        seiscomp.logging.info(
+                            "%s: no improvement - origin not sent" % eventID)
+                        return
+
+            ep = seiscomp.datamodel.EventParameters()
+            seiscomp.datamodel.Notifier.Enable()
+            ep.add(relocated)
+            event.add(seiscomp.datamodel.OriginReference(relocated.publicID()))
+            msg = seiscomp.datamodel.Notifier.GetMessage()
+            seiscomp.datamodel.Notifier.Disable()
+
+            if self.commandline().hasOption("test"):
+                seiscomp.logging.info(
+                    "test mode - not sending " + relocated.publicID())
             else:
-                seiscomp.logging.info("failed to send " + relocated.publicID())
+                if self.connection().send(msg):
+                    seiscomp.logging.info("sent " + relocated.publicID())
+                else:
+                    seiscomp.logging.info("failed to send " + relocated.publicID())
 
-        self.relocated[eventID] = relocated
+            self.relocated[eventID] = relocated
 
-        # FIXME:
-        workingDir = pathlib.Path("~/scdlpicker").expanduser()
-        try:
-            depth = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
-            seiscomp.logging.info("DEPTH=%.1f" % depth)
-        except:
-            pass
+            if attempt == "depth phase based":
+                # no 2nd attempt using depth phases
+                break
+
+            # Experimental depth computation. Logging only.
+            seiscomp.logging.debug("Computing depth for event " + eventID)
+            q = self.query()
+            ep = scstuff.dbutil.loadCompleteEvent(q, eventID, withPicks=True, preferred=True)
+            for iorg in range(ep.originCount()):
+                org = ep.origin(iorg)
+                q.loadArrivals(org)  # TEMP HACK!!!!
+
+            # FIXME:
+            workingDir = pathlib.Path("~/scdlpicker").expanduser()
+            try:
+                depthFromDepthPhases = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True)
+                # depthFromDepthPhases = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
+            except Exception as e:
+                seiscomp.logging.warning("Caught exception %s" % e)
+                traceback.print_exc()
+                depthFromDepthPhases = None
+            t = seiscomp.core.Time.GMT().toString("%F %T")
+            with open(workingDir / "depth.log", "a") as f:
+                if depthFromDepthPhases is not None:
+                    seiscomp.logging.info("DEPTH=%.1f" % depthFromDepthPhases)
+                    f.write("%s %s   %5.1f km\n" % (t, eventID, depthFromDepthPhases))
+                else:
+                    seiscomp.logging.error("DEPTH COMPUTATION FAILED for "+eventID)
+                    f.write("%s %s   depth computation failed\n" % (t, eventID))
 
 
     def run(self):
