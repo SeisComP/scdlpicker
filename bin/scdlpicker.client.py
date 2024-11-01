@@ -670,7 +670,7 @@ class App(seiscomp.client.Application):
         Process the given origin in the context of the given event.
         Used in both real-time and test mode.
         """
-        if origin.creationInfo().agencyID() in ignoredAgencyIDs:
+        if origin.creationInfo().agencyID() in self.ignoredAgencyIDs:
             return True
 
         originID = origin.publicID()
@@ -679,7 +679,7 @@ class App(seiscomp.client.Application):
         # Ignore origins without any arrivals except if this origin
         # is explicitly white listed
         if origin.arrivalCount() == 0:
-            if origin.creationInfo().agencyID() not in emptyOriginAgencyIDs:
+            if origin.creationInfo().agencyID() not in self.emptyOriginAgencyIDs:
                 seiscomp.logging.debug(
                     "No arrivals in origin " + originID + " -> skipped")
                 return
