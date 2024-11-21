@@ -45,11 +45,13 @@ agency = "GFZ"
 streamTimeout = 5
 
 # This is the working directory where all the event data are written to.
-workingDir = "~/scdlpicker"
+workingDir = "/tmp"
 
-# ignore objects (picks, origins) from these authors
-# TODO: Make configurable
-ignoredAuthors = [ "dl-reloc", author ]
+# Send new picks to this group.
+messagingGroup = "MLTEST"
+
+# Ignore objects (picks, origins) from these authors
+ignoredAuthors = [ ]
 
 # We may receive origins from other agencies, but don't want to
 # process them. Add the agency ID's here. Any origin with agencyID
@@ -60,7 +62,7 @@ ignoredAgencyIDs = []
 # origins from other agencies that come without arrivals. We usually
 # consider these trustworthy agencies and for such origins we do
 # want to search for matching, previously missed picks.
-emptyOriginAgencyIDs = ["EMSC", "BGR", "NEIC", "BMKG"]
+emptyOriginAgencyIDs = []
 
 # We can look for unpicked arrivals at additional stations.
 tryUpickedStations = True
@@ -75,14 +77,6 @@ global_net_sta_blacklist = [
 # Normally no need to change this
 timeoutInterval = 1
 
-
-ttt = seiscomp.seismology.TravelTimeTable()
-ttt.setModel("iasp91")
-
-
-def computeTravelTimes(delta, depth):
-    arrivals = ttt.compute(0, 0, depth, 0, delta, 0, 0)
-    return arrivals
 
 
 def alreadyRepicked(pick):
@@ -142,6 +136,9 @@ def gappy(waveforms, tolerance=0.5):
 class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
+        argv = argv.copy()
+        argv[0] = "scdlpicker"
+
         # adopt the defaults from the top of this script
         self.workingDir = workingDir
 
@@ -174,11 +171,11 @@ class App(seiscomp.client.Application):
         self.beforeP = 60.
         self.afterP = 60.
 
+        self.ttt = None
 
     def initConfiguration(self):
-        # Called BEFORE validateParameters()
+        # Called before validateParameters()
 
-        seiscomp.logging.error("initConfigurarion(self)")
         if not super(App, self).initConfiguration():
             return False
 
@@ -188,22 +185,32 @@ class App(seiscomp.client.Application):
             pass
 
         try:
+            self.messagingGroup = \
+                self.configGetString("scdlpicker.messagingGroup")
+        except RuntimeError:
+            self.messagingGroup = messagingGroup
+
+        try:
             self.ignoredAuthors = \
                 self.configGetStrings("scdlpicker.ignoredAuthors")
         except RuntimeError:
             self.ignoredAuthors = ignoredAuthors
+        self.ignoredAuthors = list(self.ignoredAuthors)
+        self.ignoredAuthors.append(self.author())
 
         try:
             self.ignoredAgencyIDs = \
                 self.configGetStrings("scdlpicker.ignoredAgencyIDs")
         except RuntimeError:
-            self.ignoredAgencyIDs = ignoredAgencyIDs
+            self.ignoredAgencyIDs = []
+        self.ignoredAgencyIDs = list(self.ignoredAgencyIDs)
 
         try:
-            self.emptyOriginAgencyIDs = \
+            emptyOriginAgencyIDs = \
                 self.configGetStrings("scdlpicker.emptyOriginAgencyIDs")
         except RuntimeError:
-            self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
+            pass
+        self.emptyOriginAgencyIDs = list(emptyOriginAgencyIDs)
 
         try:
             self.beforeP = self.configGetDouble("scdlpicker.beforeP")
@@ -216,6 +223,11 @@ class App(seiscomp.client.Application):
             pass
 
         try:
+            self.streamTimeout = self.configGetDouble("scdlpicker.streamTimeout")
+        except RuntimeError:
+            self.streamTimeout = streamTimeout
+
+        try:
             self.tryUpickedStations = \
                 self.configGetBool("scdlpicker.tryUpickedStations")
         except RuntimeError:
@@ -224,18 +236,26 @@ class App(seiscomp.client.Application):
 
     def dumpConfiguration(self):
         info = seiscomp.logging.info
+        info("agency = " + self.agencyID())
+        info("author = " + self.author())
         info("workingDir = " + str(self.workingDir))
+        info("messagingGroup = " + str(self.messagingGroup))
         info("ignoredAuthors = " + str(self.ignoredAuthors))
         info("ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
         info("emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
         info("tryUpickedStations = " + str(self.tryUpickedStations))
         info("beforeP = " + str(self.beforeP))
         info("afterP = " + str(self.afterP))
+        info("streamTimeout = " + str(self.streamTimeout))
 
     def createCommandLineDescription(self):
         self.commandline().addGroup("Config")
         self.commandline().addStringOption(
             "Config", "working-dir,d", "path of the working directory")
+        self.commandline().addStringOption(
+            "Config", "messaging-group,g", "messaging group to send picking results to")
+        self.commandline().addStringOption(
+            "Config", "ignored-authors", "comma-separated list of data authors to ignore")
 
         self.commandline().addGroup("Test")
         self.commandline().addStringOption(
@@ -256,11 +276,19 @@ class App(seiscomp.client.Application):
             pass
         self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
-        self.setMessagingEnabled(True)
+        if self.commandline().hasOption("messaging-group"):
+            self.messagingGroup = self.commandline().optionString("messaging-group")
+
+        # TODO
+        # ignored-authors
+        # ignored-agencies
+        # empty-origin-agencies
+
+        self.setMessagingEnabled(False)
         if not self.commandline().hasOption("event"):
             # not in event mode -> configure the messaging
             self.setMessagingEnabled(True)
-            self.setPrimaryMessagingGroup("MLTEST")
+            self.setPrimaryMessagingGroup(self.messagingGroup)
             self.addMessagingSubscription("PICK")
             self.addMessagingSubscription("LOCATION")
             self.addMessagingSubscription("EVENT")
@@ -369,6 +397,14 @@ class App(seiscomp.client.Application):
             self.processEvent(event)
             self.pollRepickerResults()
 
+    def computeTravelTimes(self, delta, depth):
+        if self.ttt is None:
+            self.ttt = seiscomp.seismology.TravelTimeTable()
+            self.ttt.setModel("iasp91")
+
+        arrivals = self.ttt.compute(0, 0, depth, 0, delta, 0, 0)
+        return arrivals
+
     def findUnpickedStations(self, origin, maxDelta, picks):
         """
         Find stations within maxDelta from origin which are not
@@ -408,7 +444,7 @@ class App(seiscomp.client.Application):
             if delta > maxDelta:
                 continue
 
-            arrivals = computeTravelTimes(delta, origin.depth().value())
+            arrivals = self.computeTravelTimes(delta, origin.depth().value())
             firstArrival = arrivals[0]
             time = origin.time().value() + \
                 seiscomp.core.TimeSpan(firstArrival.time)
@@ -491,7 +527,7 @@ class App(seiscomp.client.Application):
             # request waveforms and dump them to one file per stream
             seiscomp.logging.info("Opening RecordStream "+self.recordStreamURL())
             stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
-            stream.setTimeout(streamTimeout)
+            stream.setTimeout(self.streamTimeout)
             streamCount = 0
             for nslc in sorted(request.keys()):
                 net, sta, loc, cha = nslc

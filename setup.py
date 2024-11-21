@@ -6,11 +6,11 @@ module_name = "scdlpicker"
 setup(
     name='scdlpicker',
 
-    version="0.3.0",
+    version="0.3.1",
 
     description="scdlpicker: A Python package to enable seismic phase picking based on deep-learning in SeisComP",
 
-    url='https://github.com/jsaul/scdlpicker',
+    url='https://github.com/SeisComP/scdlpicker',
 
     author='Joachim Saul, Thomas Bornstein',
     author_email='saul@gfz-potsdam.de',
