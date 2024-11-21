@@ -147,7 +147,7 @@ class App(seiscomp.client.Application):
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
         self.tryUpickedStations = tryUpickedStations
 
-        super(App, self).__init__(argc, argv)
+        super().__init__(argc, argv)
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
 
@@ -232,6 +232,12 @@ class App(seiscomp.client.Application):
                 self.configGetBool("scdlpicker.tryUpickedStations")
         except RuntimeError:
             self.tryUpickedStations = tryUpickedStations
+
+        try:
+            self.earthModel = self.configGetString("scdlpicker.earthModel")
+        except RuntimeError:
+            self.earthModel = "iasp91"
+
         return True
 
     def dumpConfiguration(self):
@@ -258,8 +264,7 @@ class App(seiscomp.client.Application):
             "Config", "ignored-authors", "comma-separated list of data authors to ignore")
 
         self.commandline().addGroup("Test")
-        self.commandline().addStringOption(
-            "Test", "event,E", "ID of event to test")
+        self.commandline().addStringOption("Test", "event,E", "ID of event to test")
 
         return True
 
@@ -400,7 +405,7 @@ class App(seiscomp.client.Application):
     def computeTravelTimes(self, delta, depth):
         if self.ttt is None:
             self.ttt = seiscomp.seismology.TravelTimeTable()
-            self.ttt.setModel("iasp91")
+            self.ttt.setModel(self.earthModel)
 
         arrivals = self.ttt.compute(0, 0, depth, 0, delta, 0, 0)
         return arrivals
@@ -527,7 +532,7 @@ class App(seiscomp.client.Application):
             # request waveforms and dump them to one file per stream
             seiscomp.logging.info("Opening RecordStream "+self.recordStreamURL())
             stream = seiscomp.io.RecordStream.Open(self.recordStreamURL())
-            stream.setTimeout(self.streamTimeout)
+            stream.setTimeout(int(self.streamTimeout))
             streamCount = 0
             for nslc in sorted(request.keys()):
                 net, sta, loc, cha = nslc

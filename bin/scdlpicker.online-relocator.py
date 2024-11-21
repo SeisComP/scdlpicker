@@ -61,7 +61,11 @@ def getFixedDepth(origin):
 class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
-        seiscomp.client.Application.__init__(self, argc, argv)
+        argv = argv.copy()
+        argv[0] = "scdlpicker"
+
+        super(App, self).__init__(argc, argv)
+
         self.setMessagingEnabled(True)
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
@@ -69,12 +73,11 @@ class App(seiscomp.client.Application):
         self.addMessagingSubscription("LOCATION")
         self.addMessagingSubscription("EVENT")
 
-        self.minimumDepth = _defaults.minimumDepth
-        self.maxResidual = _defaults.maxResidual
-        self.minDelay = 18*60
+        self.minDepth = _defaults.minDepth
+        self.minDelay = 20*60  # 20 minutes!
         self.device = "cpu"
 
-        self.allowedAuthorIDs = _defaults.allowedAuthorIDs
+        self.pickAuthors = _defaults.pickAuthors
 
         # Keep track of changes of the preferred origin of each event
         self.preferredOrigins = dict()
@@ -94,7 +97,7 @@ class App(seiscomp.client.Application):
         self._previousPingDB = now
 
     def createCommandLineDescription(self):
-        seiscomp.client.Application.createCommandLineDescription(self)
+        super(App, self).createCommandLineDescription()
 
         self.commandline().addGroup("Config")
         self.commandline().addStringOption(
@@ -125,15 +128,41 @@ class App(seiscomp.client.Application):
             "Target", "test", "test mode - don't send the result")
 
     def initConfiguration(self):
-        # Called BEFORE validateParameters()
+        # Called before validateParameters()
 
         if not super(App, self).initConfiguration():
             return False
 
         try:
-            self.minDelay = self.configGetDouble("scdlpicker.minDelay")
+            self.pickAuthors = self.configGetDouble("scdlpicker.relocation.pickAuthors")
         except RuntimeError:
-            pass
+            pickAuthors = ["dlpicker"]
+        self.pickAuthors = list(self.pickAuthors)
+
+        try:
+            self.minDelay = self.configGetDouble("scdlpicker.relocation.minDelay")
+        except RuntimeError:
+            self.minDelay = _defaults.minDelay
+
+        try:
+            self.minDepth = self.configGetDouble("scdlpicker.relocation.minDepth")
+        except RuntimeError:
+            self.minDepth = _defaults.minDepth
+
+        try:
+            self.maxRMS = self.configGetDouble("scdlpicker.relocation.maxRMS")
+        except RuntimeError:
+            self.maxRMS = _defaults.maxRMS
+
+        try:
+            self.maxResidual = self.configGetDouble("scdlpicker.relocation.maxResidual")
+        except RuntimeError:
+            self.maxResidual = _defaults.maxResidual
+
+        try:
+            self.maxDelta = self.configGetDouble("scdlpicker.relocation.maxDelta")
+        except RuntimeError:
+            self.maxDelta = _defaults.maxDelta
 
         try:
             self.device = self.configGetString("scdlpicker.device")
@@ -155,9 +184,25 @@ class App(seiscomp.client.Application):
             pass
 
         try:
+            self.maxResidual = self.commandline().optionDouble("max-residual")
+        except RuntimeError:
+            pass
+
+        try:
+            self.maxRMS = self.commandline().optionDouble("max-rms")
+        except RuntimeError:
+            pass
+
+        try:
             self.device = self.commandline().optionString("device")
         except RuntimeError:
             pass
+
+        try:
+            pickAuthors = self.commandline().optionString("pick-authors")
+            pickAuthors = pickAuthors.split()
+        except RuntimeError:
+            pickAuthors = ["dlpicker"]
 
         return True
 
@@ -381,7 +426,7 @@ class App(seiscomp.client.Application):
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
                 origin, self.inventory,
-                self.allowedAuthorIDs, maxDelta, self.query())
+                self.pickAuthors, maxDelta, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
@@ -415,7 +460,7 @@ class App(seiscomp.client.Application):
 
             relocated = _relocation.relocate(
                 originWithArrivals, eventID, fixedDepth,
-                self.minimumDepth, self.maxResidual)
+                self.minDepth, self.maxResidual)
             if not relocated:
                 seiscomp.logging.warning("%s: relocation failed" % eventID)
                 return
@@ -492,12 +537,6 @@ class App(seiscomp.client.Application):
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
         try:
-            pickAuthors = self.commandline().optionString("pick-authors")
-            pickAuthors = pickAuthors.split()
-        except RuntimeError:
-            pickAuthors = ["dlpicker"]
-
-        try:
             self.author = self.commandline().optionString("author")
         except RuntimeError:
             self.author = "dl-reloc"
@@ -506,16 +545,6 @@ class App(seiscomp.client.Application):
             self.agencyID = self.commandline().optionString("agency")
         except RuntimeError:
             self.agencyID = "GFZ"
-
-        try:
-            self.maxResidual = self.commandline().optionDouble("max-residual")
-        except RuntimeError:
-            self.maxResidual = _defaults.maxResidual
-
-        try:
-            self.maxRMS = self.commandline().optionDouble("max-rms")
-        except RuntimeError:
-            self.maxRMS = _defaults.maxRMS
 
         try:
             eventIDs = self.commandline().optionString("event").split()
