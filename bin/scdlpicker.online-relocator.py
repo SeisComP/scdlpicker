@@ -101,11 +101,14 @@ class App(seiscomp.client.Application):
 
         self.commandline().addGroup("Config")
         self.commandline().addStringOption(
+            "Config", "working-dir,d", "Path of the working directory where intermediate files are placed and exchanged")
+        self.commandline().addStringOption(
+            "Config", "device", "'cpu' or 'gpu'. Default is 'cpu' but with access to a cuda device you can change this parameter to 'gpu'")
+
+        self.commandline().addStringOption(
             "Config", "author", "Author of created objects")
         self.commandline().addStringOption(
             "Config", "agency", "Agency of created objects")
-        self.commandline().addStringOption(
-            "Config", "device", "'cpu' or 'gpu'. Default is 'cpu'.")
 
         self.commandline().addGroup("Target")
         self.commandline().addStringOption(
@@ -132,6 +135,11 @@ class App(seiscomp.client.Application):
 
         if not super(App, self).initConfiguration():
             return False
+
+        try:
+            self.workingDir = self.configGetString("scdlpicker.workingDir")
+        except RuntimeError:
+            self.workingDir = _defaults.workingDir
 
         try:
             self.pickAuthors = self.configGetDouble("scdlpicker.relocation.pickAuthors")
@@ -167,7 +175,7 @@ class App(seiscomp.client.Application):
         try:
             self.device = self.configGetString("scdlpicker.device")
         except RuntimeError:
-            pass
+            self.device = _defaults.device
 
         return True
 
@@ -209,6 +217,8 @@ class App(seiscomp.client.Application):
     def init(self):
         if not super(App, self).init():
             return False
+
+        self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
         self.device = self.device.lower()
         _depth.initDepthModel(device=self.device)

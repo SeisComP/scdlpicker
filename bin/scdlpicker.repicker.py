@@ -123,7 +123,6 @@ class RepickerApp(seiscomp.client.Application):
             self.workingDir = self.configGetString("scdlpicker.workingDir")
         except RuntimeError:
             self.workingDir = _defaults.workingDir
-        self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
         try:
             self.device = self.configGetString("scdlpicker.device")
@@ -154,46 +153,69 @@ class RepickerApp(seiscomp.client.Application):
 
     def createCommandLineDescription(self):
         super().createCommandLineDescription()
-#   TODO
-#   parser = argparse.ArgumentParser(
-#       description='SeicComp Client - ML Repicker using SeisBench')
-#   parser.add_argument(
-#       '--model', type=str.lower,
-#   dest='model_choice',
-#       help="Choose one of the available ML models to make the predictions.")
-#   parser.add_argument(
-#       '--test', action='store_true',
-#       help="Test mode - don't write outgoing yaml with refined picks.")
-#   parser.add_argument(
-#       '--exit', action='store_true', dest="single_run",
-#       help='Exit after items in spool folder have been processed')
-#   parser.add_argument(
-#       '--bs', '--batch-size', action='store_const', const=50, default=50,
-#       dest='batchSize',
-#       help="Set batch size. Should be suitable for the hardware used [50]")
-#   parser.add_argument(
-#       '--device', choices=['cpu', 'gpu'], default='cpu',
-#       help="With access to a cuda device change this parameter to 'gpu'.")
-#   parser.add_argument(
-#       '--working-dir', type=str, default='.', dest='workingDir',
-#       help="Working directory where all files are placed and exchanged")
-#   parser.add_argument(
-#       '--dataset', type=str, default='geofon', dest='dataset',
-#       help="The dataset on which the model was predicted [geofon].")
-#   parser.add_argument(
-#       '--min-confidence', type=float, default=0.3, dest='min_confidence',
-#       help="Confidence threshold below which a pick is skipped [0.3]")
-#   args = parser.parse_args()
+
+        self.commandline().addGroup("Config")
+        self.commandline().addStringOption(
+            "Config", "working-dir,d", "Path of the working directory where intermediate files are placed and exchanged")
+        self.commandline().addStringOption(
+            "Config", "device", "'cpu' or 'gpu'. Default is 'cpu' but with access to a cuda device you can change this parameter to 'gpu'")
+        self.commandline().addStringOption(
+            "Config", "model", "Choose one of the available ML models to make the predictions")
+        self.commandline().addStringOption(
+            "Config", "dataset", "The dataset on which the model was predicted")
+        self.commandline().addStringOption(
+            "Config", "batch-size", "Set batch size. Should be suitable for the hardware used [50]")
+        self.commandline().addStringOption(
+            "Config", "min-confidence", "Confidence threshold below which a pick is skipped")
+
+        self.commandline().addGroup("Mode")
+        self.commandline().addStringOption(
+            "Mode", "test", "Test mode - don't write outgoing parameter file with refined picks")
+        self.commandline().addStringOption(
+            "Mode", "exit", "Exit after all items in spool folder have been processed")
+
         return True
 
     def validateParameters(self):
-        super().validateParameters()
-        # More TODO
+        super(RepickerApp, self).validateParameters()
+
+        try:
+            self.workingDir = self.commandline().optionString("working-dir")
+        except RuntimeError:
+            pass
+
+        try:
+            self.device = self.commandline().optionString("device")
+        except RuntimeError:
+            pass
+
+        try:
+            self.modelName = self.commandline().optionString("model")
+        except RuntimeError:
+            pass
+
+        try:
+            self.dataset = self.commandline().optionString("dataset")
+        except RuntimeError:
+            pass
+
+        try:
+            self.batchSize = self.commandline().optionInt("batch-size")
+        except RuntimeError:
+            pass
+
+        try:
+            self.minConfidence = self.commandline().optionDouble("min-confidence")
+        except RuntimeError:
+            pass
+
         return True
 
     def init(self):
         if not super(RepickerApp, self).init():
             return False
+
+        self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
         if self.modelName not in models:
             raise ValueError("No such model: " + modelName)
@@ -480,7 +502,7 @@ class RepickerApp(seiscomp.client.Application):
                 continue
 
             if not new_picks:
-                seiscomp.logging.warning("no results - exiting")
+                seiscomp.logging.info("no results - exiting")
                 link.unlink()
                 continue
 

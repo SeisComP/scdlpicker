@@ -29,6 +29,7 @@ import scdlpicker.inventory as _inventory
 import scdlpicker.util as _util
 import scdlpicker.dbutil as _dbutil
 import scdlpicker.eventworkspace as _ews
+import scdlpicker.defaults as _defaults
 
 
 # Below are parameters that for the time being are hardcoded.
@@ -36,16 +37,10 @@ import scdlpicker.eventworkspace as _ews
 # That's me! This author ID will be written into all new picks.
 author = "dlpicker"
 
-# Agency ID to be written into all new picks.
-agency = "GFZ"
-
 # The acquisition will wait that long to finalize the acquisition
 # of waveform time windows. The processing may be interrupted that
 # long!
 streamTimeout = 5
-
-# This is the working directory where all the event data are written to.
-workingDir = "/tmp"
 
 # Send new picks to this group.
 messagingGroup = "MLTEST"
@@ -139,9 +134,6 @@ class App(seiscomp.client.Application):
         argv = argv.copy()
         argv[0] = "scdlpicker"
 
-        # adopt the defaults from the top of this script
-        self.workingDir = workingDir
-
         self.ignoredAuthors = ignoredAuthors
         self.ignoredAgencyIDs = ignoredAgencyIDs
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
@@ -182,7 +174,7 @@ class App(seiscomp.client.Application):
         try:
             self.workingDir = self.configGetString("scdlpicker.workingDir")
         except RuntimeError:
-            pass
+            self.workingDir = _defaults.workingDir
 
         try:
             self.messagingGroup = \
@@ -257,7 +249,7 @@ class App(seiscomp.client.Application):
     def createCommandLineDescription(self):
         self.commandline().addGroup("Config")
         self.commandline().addStringOption(
-            "Config", "working-dir,d", "path of the working directory")
+            "Config", "working-dir,d", "Path of the working directory where intermediate files are placed and exchanged")
         self.commandline().addStringOption(
             "Config", "messaging-group,g", "messaging group to send picking results to")
         self.commandline().addStringOption(
@@ -279,7 +271,6 @@ class App(seiscomp.client.Application):
             self.workingDir = self.commandline().optionString("working-dir")
         except RuntimeError:
             pass
-        self.workingDir = pathlib.Path(self.workingDir).expanduser()
 
         if self.commandline().hasOption("messaging-group"):
             self.messagingGroup = self.commandline().optionString("messaging-group")
@@ -298,6 +289,14 @@ class App(seiscomp.client.Application):
             self.addMessagingSubscription("LOCATION")
             self.addMessagingSubscription("EVENT")
 
+        return True
+
+    def init(self):
+        if not super(App, self).init():
+            return False
+
+        self.workingDir = pathlib.Path(self.workingDir).expanduser()
+
         # This is the directory where all the event data are written to.
         self.eventRootDir = self.workingDir / "events"
 
@@ -310,12 +309,6 @@ class App(seiscomp.client.Application):
 
         # After sending the data to the messaging, the file is move to here.
         self.sentDir = self.workingDir / "sent"
-
-        return True
-
-    def init(self):
-        if not super(App, self).init():
-            return False
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
@@ -348,7 +341,7 @@ class App(seiscomp.client.Application):
             time.sleep(0.0001)  # wait for 100 microseconds
             now = seiscomp.core.Time.GMT()
             ctime = now
-            ci = _util.creationInfo(author, agency, ctime)
+            ci = _util.creationInfo(author, self.agencyID(), ctime)
             pick = picks[pickID]
             pick.setCreationInfo(ci)
 
