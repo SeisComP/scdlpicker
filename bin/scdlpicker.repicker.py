@@ -32,7 +32,7 @@ import seiscomp.client
 import seiscomp.datamodel
 import seiscomp.logging
 
-import scdlpicker.defaults as _defaults
+import scdlpicker.config as _config
 
 
 # Here is the place to import other DL models
@@ -113,44 +113,6 @@ class RepickerApp(seiscomp.client.Application):
         self.test = False
         self.singleRun = False
 
-    def initConfiguration(self):
-        # Called before validateParameters()
-
-        if not super().initConfiguration():
-            return False
-
-        try:
-            self.workingDir = self.configGetString("scdlpicker.workingDir")
-        except RuntimeError:
-            self.workingDir = _defaults.workingDir
-
-        try:
-            self.device = self.configGetString("scdlpicker.device")
-        except RuntimeError:
-            self.device = _defaults.device
-
-        try:
-            self.dataset = self.configGetString("scdlpicker.picking.dataset")
-        except RuntimeError:
-            self.dataset = _defaults.dataset
-
-        try:
-            self.modelName = self.configGetString("scdlpicker.picking.modelName")
-        except RuntimeError:
-            self.modelName = _defaults.modelName
-
-        try:
-            self.batchSize = self.configGetInt("scdlpicker.picking.batchSize")
-        except RuntimeError:
-            self.batchSize = _defaults.batchSize
-
-        try:
-            self.minConfidence = self.configGetString("scdlpicker.picking.minConfidence")
-        except RuntimeError:
-            self.minConfidence = _defaults.minConfidence
-
-        return True
-
     def createCommandLineDescription(self):
         super().createCommandLineDescription()
 
@@ -176,62 +138,30 @@ class RepickerApp(seiscomp.client.Application):
 
         return True
 
-    def validateParameters(self):
-        super(RepickerApp, self).validateParameters()
-
-        try:
-            self.workingDir = self.commandline().optionString("working-dir")
-        except RuntimeError:
-            pass
-
-        try:
-            self.device = self.commandline().optionString("device")
-        except RuntimeError:
-            pass
-
-        try:
-            self.modelName = self.commandline().optionString("model")
-        except RuntimeError:
-            pass
-
-        try:
-            self.dataset = self.commandline().optionString("dataset")
-        except RuntimeError:
-            pass
-
-        try:
-            self.batchSize = self.commandline().optionInt("batch-size")
-        except RuntimeError:
-            pass
-
-        try:
-            self.minConfidence = self.commandline().optionDouble("min-confidence")
-        except RuntimeError:
-            pass
-
-        return True
-
     def init(self):
         if not super(RepickerApp, self).init():
             return False
 
-        self.workingDir = pathlib.Path(self.workingDir).expanduser()
+        commonConfig = _config.getCommonConfig(self)
+        self.workingDir = commonConfig.workingDir
 
-        if self.modelName not in models:
-            raise ValueError("No such model: " + modelName)
+        self.pickingConfig = _config.getPickingConfig(self)
 
-        self.model = models[self.modelName].from_pretrained(self.dataset)
+        if self.pickingConfig.modelName not in models:
+            raise ValueError("No such model: " + self.pickingConfig.modelName)
+
+        self.model = models[self.pickingConfig.modelName].from_pretrained(self.pickingConfig.dataset)
 
         self.eventRootDir = self.workingDir / "events"
         self.spoolDir = self.workingDir / "spool"
         self.workspaces = dict()
 
-        if self.device == "cpu":
+        if commonConfig.device == "cpu":
             self.model.cpu()
-        elif self.device == "gpu":
+        elif commonConfig.device == "gpu":
             self.model.cuda()
         else:
-            seiscomp.logging.error("Unknown device " + self.device)
+            seiscomp.logging.error("Unknown device " + commonConfig.device)
             return False
 
         self.expected_input_length_sec = \
@@ -398,13 +328,13 @@ class RepickerApp(seiscomp.client.Application):
                 if abs(dt) > dt_max:
                     seiscomp.logging.info("SKIPPED dt = %.2f" % dt)
                     continue
-                if ml_conf < self.minConfidence:
+                if ml_conf < self.pickingConfig.minConfidence:
                     seiscomp.logging.info("SKIPPED conf = %.3f" % ml_conf)
                     continue
                 old_pick = workspace.picks[pick_id]
                 new_pick = old_pick.copy()
                 new_pick.publicID = old_pick.publicID + "/repick"
-                new_pick.model = self.modelName
+                new_pick.model = self.pickingConfig.modelName
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
 
@@ -656,7 +586,7 @@ class RepickerApp(seiscomp.client.Application):
 
         acc_predictions = {}
         picks_remain_size = picks_all_size = len(adhoc_picks)
-        start_index, end_index = 0, min(self.batchSize, picks_all_size)
+        start_index, end_index = 0, min(self.pickingConfig.batchSize, picks_all_size)
 
         # Batch loop
         # We process the input data in batches with the size defined
@@ -682,10 +612,10 @@ class RepickerApp(seiscomp.client.Application):
                     acc_predictions, stream, collected_picks, annotDir, eventID)
 
             # Prepare for next batch
-            picks_remain_size -= self.batchSize
-            start_index += self.batchSize
+            picks_remain_size -= self.pickingConfig.batchSize
+            start_index += self.pickingConfig.batchSize
             end_index = min(
-                start_index + self.batchSize,
+                start_index + self.pickingConfig.batchSize,
                 start_index + picks_remain_size)
 
         seiscomp.logging.debug("Finished prediction.")

@@ -21,7 +21,6 @@ import seiscomp.datamodel
 import seiscomp.logging
 import scdlpicker.util as _util
 import scdlpicker.dbutil as _dbutil
-import scdlpicker.defaults as _defaults
 import scdlpicker.inventory as _inventory
 
 
@@ -133,7 +132,7 @@ def loadPicksForTimespan(query, startTime, endTime,
     return objects
 
 
-def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query, keepManualPicks=True):
+def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, maxResidual, query, keepManualPicks=True):
     etime = origin.time().value()
     elat = origin.latitude().value()
     elon = origin.longitude().value()
@@ -180,7 +179,7 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query, kee
         theo = etime + seiscomp.core.TimeSpan(ptime.time)
         dt = float(pick.time().value() - theo)
 
-        if not -4*_defaults.maxResidual < dt < 4*_defaults.maxResidual:
+        if not -4*maxResidual < dt < 4*maxResidual:
             continue
 
         picks_of_interest[pickID] = pick
@@ -264,7 +263,7 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query, kee
 
         # Initially we grab more picks than within the final
         # residual range and trim the residuals later.
-        if not -2*_defaults.maxResidual < dt < 2*_defaults.maxResidual:
+        if not -2*maxResidual < dt < 2*maxResidual:
             print(pickID, "---", dt)
             continue
 
@@ -275,7 +274,7 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, query, kee
         arr = seiscomp.datamodel.Arrival()
         arr.setPhase(phase)
         arr.setPickID(pickID)
-        arr.setTimeUsed(delta <= _defaults.maxDelta)
+        arr.setTimeUsed(delta <= maxDelta)
         arr.setWeight(1.)
         origin.add(arr)
         print(pickID, "+++", dt)
