@@ -1,7 +1,7 @@
 # The minimum depth for a relocation. If the locator locates the
 # depth shallower than this depth, the depth is fixed at this value.
 
-minimumDepth = 10.
+minDepth = 10.
 
 
 # Maximum residual of any individual pick. The relocator will
@@ -21,4 +21,18 @@ maxDelta = 105.
 
 # List of allowed pick authors.
 
-allowedAuthorIDs = ["dlpicker"]
+pickAuthors = ["dlpicker"]
+
+
+workingDir = "/tmp"
+
+
+dataset = "geofon"
+
+modelName = "eqtransformer"
+
+device = "cpu"
+
+batchSize = 1
+
+minConfidence = 0.4

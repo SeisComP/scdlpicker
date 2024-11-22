@@ -18,14 +18,22 @@
 ###########################################################################
 
 import pathlib
+import sys
 import yaml
 import time
-import logging
 import numpy as np
 import scipy.signal
 from typing import Tuple
 import argparse
 import obspy
+
+import seiscomp.core
+import seiscomp.client
+import seiscomp.datamodel
+import seiscomp.logging
+
+import scdlpicker.defaults as _defaults
+
 
 # Here is the place to import other DL models
 from seisbench.models import EQTransformer, PhaseNet
@@ -38,11 +46,6 @@ models = {
     'phn': PhaseNet,
     'eqt': EQTransformer,
 }
-
-LOGFORMAT = "%(levelname)-8s  %(asctime)s %(message)s"
-logging.basicConfig(format=LOGFORMAT)
-logger = logging.getLogger('origin-repicker')
-logger.setLevel(logging.DEBUG)
 
 
 class EventWorkspaceContainer:
@@ -68,7 +71,7 @@ def timestamp(t):
     return (t.isoformat() + "000000")[:23] + "Z"
 
 
-class Repicker:
+class RepickerApp(seiscomp.client.Application):
     """A class to hold settings and provide methods for arbitrary seisbench
     compatible P wave pickers.
 
@@ -91,38 +94,128 @@ class Repicker:
         test(bool): To test the main functionality, stops before writing
                     outgoing files
 
-        batch_size(int): Repicker will set the size of a batch to this
+        batchSize(int): Repicker will set the size of a batch to this
                         (at maximum)
 
         device(str): Defines where to run the model - "cpu" or "gpu"
     """
 
-    def __init__(self, model_name=None, dataset="geofon", workingDir=".",
-                 test=False, single_run=False, batch_size=False, device="cpu",
-                 min_confidence=0.4):
+    def __init__(self, argc, argv):
+        argv = argv.copy()
+        argv[0] = "scdlpicker"
 
-        if model_name not in models:
-            raise ValueError("No such model: " + model_name)
+        super().__init__(argc, argv)
+        self.setDatabaseEnabled(False, False)
+        self.setLoadInventoryEnabled(False)
+        self.setLoadConfigModuleEnabled(False)
+        self.setMessagingEnabled(False)
 
-        self.model = models[model_name].from_pretrained(dataset)
-        self.model_name = model_name
+        self.test = False
+        self.singleRun = False
 
-        self.test = test
-        self.single_run = single_run
-        self.workingDir = workingDir
-        self.eventRootDir = workingDir / "events"
-        self.spoolDir = workingDir / "spool"
-        self.batch_size = batch_size
+    def initConfiguration(self):
+        # Called before validateParameters()
+
+        if not super().initConfiguration():
+            return False
+
+        try:
+            self.workingDir = self.configGetString("scdlpicker.workingDir")
+        except RuntimeError:
+            self.workingDir = _defaults.workingDir
+        self.workingDir = pathlib.Path(self.workingDir).expanduser()
+
+        try:
+            self.device = self.configGetString("scdlpicker.device")
+        except RuntimeError:
+            self.device = _defaults.device
+
+        try:
+            self.dataset = self.configGetString("scdlpicker.picking.dataset")
+        except RuntimeError:
+            self.dataset = _defaults.dataset
+
+        try:
+            self.modelName = self.configGetString("scdlpicker.picking.modelName")
+        except RuntimeError:
+            self.modelName = _defaults.modelName
+
+        try:
+            self.batchSize = self.configGetInt("scdlpicker.picking.batchSize")
+        except RuntimeError:
+            self.batchSize = _defaults.batchSize
+
+        try:
+            self.minConfidence = self.configGetString("scdlpicker.picking.minConfidence")
+        except RuntimeError:
+            self.minConfidence = _defaults.minConfidence
+
+        return True
+
+    def createCommandLineDescription(self):
+        super().createCommandLineDescription()
+#   TODO
+#   parser = argparse.ArgumentParser(
+#       description='SeicComp Client - ML Repicker using SeisBench')
+#   parser.add_argument(
+#       '--model', type=str.lower,
+#   dest='model_choice',
+#       help="Choose one of the available ML models to make the predictions.")
+#   parser.add_argument(
+#       '--test', action='store_true',
+#       help="Test mode - don't write outgoing yaml with refined picks.")
+#   parser.add_argument(
+#       '--exit', action='store_true', dest="single_run",
+#       help='Exit after items in spool folder have been processed')
+#   parser.add_argument(
+#       '--bs', '--batch-size', action='store_const', const=50, default=50,
+#       dest='batchSize',
+#       help="Set batch size. Should be suitable for the hardware used [50]")
+#   parser.add_argument(
+#       '--device', choices=['cpu', 'gpu'], default='cpu',
+#       help="With access to a cuda device change this parameter to 'gpu'.")
+#   parser.add_argument(
+#       '--working-dir', type=str, default='.', dest='workingDir',
+#       help="Working directory where all files are placed and exchanged")
+#   parser.add_argument(
+#       '--dataset', type=str, default='geofon', dest='dataset',
+#       help="The dataset on which the model was predicted [geofon].")
+#   parser.add_argument(
+#       '--min-confidence', type=float, default=0.3, dest='min_confidence',
+#       help="Confidence threshold below which a pick is skipped [0.3]")
+#   args = parser.parse_args()
+        return True
+
+    def validateParameters(self):
+        super().validateParameters()
+        # More TODO
+        return True
+
+    def init(self):
+        if not super(RepickerApp, self).init():
+            return False
+
+        if self.modelName not in models:
+            raise ValueError("No such model: " + modelName)
+
+        self.model = models[self.modelName].from_pretrained(self.dataset)
+
+        self.eventRootDir = self.workingDir / "events"
+        self.spoolDir = self.workingDir / "spool"
         self.workspaces = dict()
-        self.min_confidence = min_confidence
 
-        if device == "cpu":
+        if self.device == "cpu":
             self.model.cpu()
-        elif device == "gpu":
+        elif self.device == "gpu":
             self.model.cuda()
+        else:
+            seiscomp.logging.error("Unknown device " + self.device)
+            return False
 
         self.expected_input_length_sec = \
             self.model.in_samples / self.model.sampling_rate
+
+        return True
 
     def _get_stream_from_picks(self, picks, eventID) \
             -> Tuple[obspy.core.stream.Stream, list]:
@@ -140,7 +233,7 @@ class Repicker:
         for pick in picks:
             pick: Pick
             pickID = pick.publicID
-            logger.debug("//// " + pickID)
+            seiscomp.logging.debug("//// " + pickID)
 
             nslc = (pick.networkCode, pick.stationCode,
                     pick.locationCode, pick.channelCode[0:2])
@@ -162,15 +255,15 @@ class Repicker:
                     files.append(file)
 
             if len(files) < 3:
-                logger.debug("---- " + pickID)
+                seiscomp.logging.debug("---- " + pickID)
                 if not files:
-                    logger.debug("---- not enough data -> skipped")
+                    seiscomp.logging.debug("---- not enough data -> skipped")
                 else:
-                    logger.debug("---- missing components -> skipped")
+                    seiscomp.logging.debug("---- missing components -> skipped")
                 continue
 
             # All needed files exist
-            logger.debug("++++ " + pickID)
+            seiscomp.logging.debug("++++ " + pickID)
 
             streams = []
 
@@ -183,17 +276,17 @@ class Repicker:
             except (TypeError, ValueError,
                     obspy.io.mseed.InternalMSEEDError,
                     obspy.io.mseed.ObsPyMSEEDFilesizeTooSmallError) as e:
-                logger.warning(
+                seiscomp.logging.warning(
                     "Caught " + repr(e) + " while processing pick " + pickID)
                 continue
             except Exception as e:
-                logger.warning("Unknown exception: " + str(e))
+                seiscomp.logging.warning("Unknown exception: " + str(e))
 
             # Check if trace is shorter than needed
             for s in streams:
                 trace_len = s[0].stats.endtime - s[0].stats.starttime
                 if trace_len < self.expected_input_length_sec:
-                    logger.warning(
+                    seiscomp.logging.warning(
                         f"Trace {nslc} ({s[0].meta.channel}): "
                         "length {trace_len:.2f}s is too short. "
                         "Picker needs {self.expected_input_length_sec:.2f}s.")
@@ -204,7 +297,7 @@ class Repicker:
                 collected_picks.append(pick)
 
         if len(collected_picks) == 0:
-            logger.debug(f"Empty stream for event {eventID}.")
+            seiscomp.logging.debug(f"Empty stream for event {eventID}.")
 
         if len(stream) == 0:
             stream = None
@@ -218,7 +311,7 @@ class Repicker:
         workspace and returns all recently calculated ML picks.
         """
 
-        logger.debug("process %s    %d picks" % (eventID, len(adhoc_picks)))
+        seiscomp.logging.debug("process %s    %d picks" % (eventID, len(adhoc_picks)))
 
         if eventID not in self.workspaces:
             self.workspaces[eventID] = EventWorkspaceContainer()
@@ -241,7 +334,7 @@ class Repicker:
                 workspace.picks[pick_id] = pick
                 new_adhoc_picks.append(pick)
         tmp = "%d" % len(new_adhoc_picks) if new_adhoc_picks else "no"
-        logger.debug(tmp + " new picks")
+        seiscomp.logging.debug(tmp + " new picks")
 
         if not new_adhoc_picks:
             return []
@@ -249,13 +342,13 @@ class Repicker:
         # Extra debug output to see if we accidentally process
         # any "new" picks twice
         for pick in new_adhoc_picks:
-            logger.debug("NEW PICK %s" % pick.publicID)
+            seiscomp.logging.debug("NEW PICK %s" % pick.publicID)
 
         # ++++++++++++ Get Predictions +++++++++++++++++#
         predictions = self._ml_predict(new_adhoc_picks, eventID)
 
         if not predictions:
-            logger.warning("processing returned without result")
+            seiscomp.logging.warning("processing returned without result")
             return []
 
         new_picks = list()
@@ -269,8 +362,8 @@ class Repicker:
             triggering_pick = workspace.picks[pick_id]
 
             for (ml_time, ml_conf) in preds:
-                logger.info("PICK   %s" % pick_id)
-                logger.info("RESULT %s  c= %.2f" %
+                seiscomp.logging.info("PICK   %s" % pick_id)
+                seiscomp.logging.info("RESULT %s  c= %.2f" %
                             (timestamp(ml_time), ml_conf))
 
                 # FIXME: temporary criterion
@@ -281,15 +374,15 @@ class Repicker:
                 dt_max = 10
                 dt = abs(ml_time - obspy.UTCDateTime(triggering_pick.time))
                 if abs(dt) > dt_max:
-                    logger.info("SKIPPED dt = %.2f" % dt)
+                    seiscomp.logging.info("SKIPPED dt = %.2f" % dt)
                     continue
-                if ml_conf < self.min_confidence:
-                    logger.info("SKIPPED conf = %.3f" % ml_conf)
+                if ml_conf < self.minConfidence:
+                    seiscomp.logging.info("SKIPPED conf = %.3f" % ml_conf)
                     continue
                 old_pick = workspace.picks[pick_id]
                 new_pick = old_pick.copy()
                 new_pick.publicID = old_pick.publicID + "/repick"
-                new_pick.model = self.model_name
+                new_pick.model = self.modelName
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
 
@@ -314,7 +407,7 @@ class Repicker:
             if path.is_symlink():
                 target = path.readlink()
                 if not target.exists():
-                    logger.warning("missing %s" % target)
+                    seiscomp.logging.warning("missing %s" % target)
                     continue
 
                 items.append( (path, target) )
@@ -369,7 +462,7 @@ class Repicker:
         for item in sorted(self._spoolItems(), reverse=reverse):
             link, target = item
 
-            logger.debug("+++reading %s" % target)
+            seiscomp.logging.debug("+++reading %s" % target)
             adhoc_picks = self._readPicksFromYaml(target)
 
             # FIXME: hackish
@@ -383,16 +476,16 @@ class Repicker:
             try:
                 new_picks = self._process(adhoc_picks, eventID)
             except RuntimeError as e:
-                logger.warning(str(e))
+                seiscomp.logging.warning(str(e))
                 continue
 
             if not new_picks:
-                logging.warning("no results - exiting")
+                seiscomp.logging.warning("no results - exiting")
                 link.unlink()
                 continue
 
             if self.test:
-                logger.info("+++test mode - stopping")
+                seiscomp.logging.info("+++test mode - stopping")
                 continue
 
             eventDir = self.eventRootDir / eventID
@@ -409,10 +502,10 @@ class Repicker:
             src = yamlFileName
 
             try:
-                logging.debug("creating symlink %s -> %s" % (dst, src))
+                seiscomp.logging.debug("creating symlink %s -> %s" % (dst, src))
                 dst.symlink_to(src)
             except FileExistsError:
-                logging.warning("symlink  %s -> %s" % (dst, src))
+                seiscomp.logging.warning("symlink  %s -> %s" % (dst, src))
 
             # we are done with this item
             link.unlink()
@@ -431,8 +524,8 @@ class Repicker:
             self._poll()
             time.sleep(1)
 
-            if self.single_run:
-                logger.info("+++single-run mode - exiting")
+            if self.singleRun:
+                seiscomp.logging.info("+++single-run mode - exiting")
                 break
 
         return True
@@ -466,7 +559,7 @@ class Repicker:
                         and p.locationCode == annotation.meta.location,
                         collected_picks))
                 except StopIteration:
-                    logger.warning(
+                    seiscomp.logging.warning(
                         "%s: failed to associate annotation for %s.%s" % (
                             eventID,
                             annotation.meta.network,
@@ -487,7 +580,6 @@ class Repicker:
 
                 assoc_ind.append(i)
                 annot_f = annotDir / (dotted_nslc(pick) + ".sac")
-                print(annot_f)
                 annotation.write(str(annot_f), format="SAC")
 
                 confidence = annotation.data.astype(np.double)
@@ -503,13 +595,13 @@ class Repicker:
                         predictions[pick.publicID] = []
                     new_item = (picktime, confidence[peak])
                     predictions[pick.publicID].append(new_item)
-                    logger.debug(
+                    seiscomp.logging.debug(
                         "#### " + pick.publicID + "  %.3f" % confidence[peak])
 
                 collected_picks.remove(pick)
 
         except (TypeError, ValueError, ZeroDivisionError) as e:
-            logger.error(eventID+": caught "+repr(e))
+            seiscomp.logging.error(eventID+": caught "+repr(e))
 
         if None not in [annotations, assoc_ind]:
             # Clean annotations from those who were associated successfully
@@ -518,11 +610,11 @@ class Repicker:
             left_annos_n = len(annotations)
             left_adhocs_n = len(collected_picks)
             if left_annos_n > 0:
-                logger.warning(
+                seiscomp.logging.warning(
                     f"There were {left_annos_n} annotations that "
                     "could not be associated.")
             if left_adhocs_n > 0:
-                logger.warning(
+                seiscomp.logging.warning(
                     f"There were {left_adhocs_n} picks for "
                     "which no annotation was done.")
 
@@ -535,20 +627,20 @@ class Repicker:
             dict: a dictionary of `pickID: (time, confidence)` pairs
         """
 
-        logger.debug("Starting prediction")
+        seiscomp.logging.debug("Starting prediction")
 
         annotDir = self.eventRootDir / eventID / "annot"
         annotDir.mkdir(parents=True, exist_ok=True)
 
         acc_predictions = {}
         picks_remain_size = picks_all_size = len(adhoc_picks)
-        start_index, end_index = 0, min(self.batch_size, picks_all_size)
+        start_index, end_index = 0, min(self.batchSize, picks_all_size)
 
         # Batch loop
         # We process the input data in batches with the size defined
-        # by batch_size
+        # by batchSize
         while picks_remain_size > 0:
-            logger.debug(f"ML prediction {picks_remain_size} remaining picks")
+            seiscomp.logging.debug(f"ML prediction {picks_remain_size} remaining picks")
             picks_batch = adhoc_picks[start_index:end_index]
 
             try:
@@ -556,7 +648,7 @@ class Repicker:
                     self._get_stream_from_picks(picks_batch, eventID)
             except Exception as e:
                 etxt = str(e)
-                logger.debug(f"{eventID}: caught unknown exception: {etxt}")
+                seiscomp.logging.debug(f"{eventID}: caught unknown exception: {etxt}")
                 stream = None
 
             if stream is not None:
@@ -568,58 +660,20 @@ class Repicker:
                     acc_predictions, stream, collected_picks, annotDir, eventID)
 
             # Prepare for next batch
-            picks_remain_size -= self.batch_size
-            start_index += self.batch_size
+            picks_remain_size -= self.batchSize
+            start_index += self.batchSize
             end_index = min(
-                start_index + self.batch_size,
+                start_index + self.batchSize,
                 start_index + picks_remain_size)
 
-        logger.debug("Finished prediction.")
+        seiscomp.logging.debug("Finished prediction.")
         return acc_predictions
 
 
-if __name__ == '__main__':
-    modelnames = list(models.keys())
-    parser = argparse.ArgumentParser(
-        description='SeicComp Client - ML Repicker using SeisBench')
-    parser.add_argument(
-        '--model', choices=modelnames, default=modelnames[0], type=str.lower,
-	dest='model_choice',
-        help="Choose one of the available ML models to make the predictions.")
-    parser.add_argument(
-        '--test', action='store_true',
-        help="Test mode - don't write outgoing yaml with refined picks.")
-    parser.add_argument(
-        '--exit', action='store_true', dest="single_run",
-        help='Exit after items in spool folder have been processed')
-    parser.add_argument(
-        '--bs', '--batch-size', action='store_const', const=50, default=50,
-        dest='batch_size',
-        help="Set batch size. Should be suitable for the hardware used [50]")
-    parser.add_argument(
-        '--device', choices=['cpu', 'gpu'], default='cpu',
-        help="With access to a cuda device change this parameter to 'gpu'.")
-    parser.add_argument(
-        '--working-dir', type=str, default='.', dest='workingDir',
-        help="Working directory where all files are placed and exchanged")
-    parser.add_argument(
-        '--dataset', type=str, default='geofon', dest='dataset',
-        help="The dataset on which the model was predicted [geofon].")
-    parser.add_argument(
-        '--min-confidence', type=float, default=0.3, dest='min_confidence',
-        help="Confidence threshold below which a pick is skipped [0.3]")
-    args = parser.parse_args()
+def main():
+    app = RepickerApp(len(sys.argv), sys.argv)
+    app()
 
-    workingDir = pathlib.Path(args.workingDir).expanduser()
 
-    repicker = Repicker(
-        model_name=args.model_choice.lower(),
-        dataset=args.dataset,
-        test=args.test,
-        single_run=args.single_run,
-        batch_size=args.batch_size,
-        workingDir = workingDir,
-        device=args.device,
-        min_confidence=args.min_confidence
-    )
-    repicker.run()
+if __name__ == "__main__":
+    main()
