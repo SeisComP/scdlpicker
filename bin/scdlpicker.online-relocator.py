@@ -39,7 +39,7 @@ import seiscomp.seismology
 import scdlpicker.dbutil as _dbutil
 import scdlpicker.util as _util
 import scdlpicker.relocation as _relocation
-import scdlpicker.defaults as _defaults
+import scdlpicker.config as _config
 import scdlpicker.depth as _depth
 import scstuff.dbutil
 
@@ -73,11 +73,10 @@ class App(seiscomp.client.Application):
         self.addMessagingSubscription("LOCATION")
         self.addMessagingSubscription("EVENT")
 
-        self.minDepth = _defaults.minDepth
         self.minDelay = 20*60  # 20 minutes!
-        self.device = "cpu"
 
-        self.pickAuthors = _defaults.pickAuthors
+        # List of allowed pick authors.
+        self.pickAuthors = ["dlpicker"]
 
         # Keep track of changes of the preferred origin of each event
         self.preferredOrigins = dict()
@@ -137,11 +136,6 @@ class App(seiscomp.client.Application):
             return False
 
         try:
-            self.workingDir = self.configGetString("scdlpicker.workingDir")
-        except RuntimeError:
-            self.workingDir = _defaults.workingDir
-
-        try:
             self.pickAuthors = self.configGetDouble("scdlpicker.relocation.pickAuthors")
         except RuntimeError:
             pickAuthors = ["dlpicker"]
@@ -150,32 +144,7 @@ class App(seiscomp.client.Application):
         try:
             self.minDelay = self.configGetDouble("scdlpicker.relocation.minDelay")
         except RuntimeError:
-            self.minDelay = _defaults.minDelay
-
-        try:
-            self.minDepth = self.configGetDouble("scdlpicker.relocation.minDepth")
-        except RuntimeError:
-            self.minDepth = _defaults.minDepth
-
-        try:
-            self.maxRMS = self.configGetDouble("scdlpicker.relocation.maxRMS")
-        except RuntimeError:
-            self.maxRMS = _defaults.maxRMS
-
-        try:
-            self.maxResidual = self.configGetDouble("scdlpicker.relocation.maxResidual")
-        except RuntimeError:
-            self.maxResidual = _defaults.maxResidual
-
-        try:
-            self.maxDelta = self.configGetDouble("scdlpicker.relocation.maxDelta")
-        except RuntimeError:
-            self.maxDelta = _defaults.maxDelta
-
-        try:
-            self.device = self.configGetString("scdlpicker.device")
-        except RuntimeError:
-            self.device = _defaults.device
+            pass
 
         return True
 
@@ -192,21 +161,6 @@ class App(seiscomp.client.Application):
             pass
 
         try:
-            self.maxResidual = self.commandline().optionDouble("max-residual")
-        except RuntimeError:
-            pass
-
-        try:
-            self.maxRMS = self.commandline().optionDouble("max-rms")
-        except RuntimeError:
-            pass
-
-        try:
-            self.device = self.commandline().optionString("device")
-        except RuntimeError:
-            pass
-
-        try:
             pickAuthors = self.commandline().optionString("pick-authors")
             pickAuthors = pickAuthors.split()
         except RuntimeError:
@@ -218,10 +172,12 @@ class App(seiscomp.client.Application):
         if not super(App, self).init():
             return False
 
-        self.workingDir = pathlib.Path(self.workingDir).expanduser()
+        commonConfig = _config.getCommonConfig(self)
+        self.workingDir = commonConfig.workingDir
 
-        self.device = self.device.lower()
-        _depth.initDepthModel(device=self.device)
+        _depth.initDepthModel(device=commonConfig.device)
+
+        self.relocationConfig = _config.getRelocationConfig(self)
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
@@ -432,11 +388,10 @@ class App(seiscomp.client.Application):
             seiscomp.logging.debug("setting fixed depth to %f km" % fixedDepth)
 
         # Load all picks for a matching time span, independent of association.
-        maxDelta = _defaults.maxDelta
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
                 origin, self.inventory,
-                self.pickAuthors, maxDelta, self.query())
+                self.pickAuthors, self.relocationConfig.maxDelta, self.relocationConfig.maxResidual, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
@@ -470,7 +425,7 @@ class App(seiscomp.client.Application):
 
             relocated = _relocation.relocate(
                 originWithArrivals, eventID, fixedDepth,
-                self.minDepth, self.maxResidual)
+                self.relocationConfig.minDepth, self.relocationConfig.maxResidual)
             if not relocated:
                 seiscomp.logging.warning("%s: relocation failed" % eventID)
                 return
@@ -502,8 +457,7 @@ class App(seiscomp.client.Application):
             seiscomp.datamodel.Notifier.Disable()
 
             if self.commandline().hasOption("test"):
-                seiscomp.logging.info(
-                    "test mode - not sending " + relocated.publicID())
+                seiscomp.logging.info("test mode - not sending " + relocated.publicID())
             else:
                 if self.connection().send(msg):
                     seiscomp.logging.info("sent " + relocated.publicID())
@@ -524,17 +478,15 @@ class App(seiscomp.client.Application):
                 org = ep.origin(iorg)
                 q.loadArrivals(org)  # TEMP HACK!!!!
 
-            # FIXME:
-            workingDir = pathlib.Path("~/scdlpicker").expanduser()
             try:
-                depthFromDepthPhases = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True)
-                # depthFromDepthPhases = _depth.computeDepth(ep, eventID, workingDir, seiscomp_workflow=True, picks=picks)
+                depthFromDepthPhases = _depth.computeDepth(ep, eventID, self.workingDir, seiscomp_workflow=True)
+                # depthFromDepthPhases = _depth.computeDepth(ep, eventID, self.workingDir, seiscomp_workflow=True, picks=picks)
             except Exception as e:
                 seiscomp.logging.warning("Caught exception %s" % e)
                 traceback.print_exc()
                 depthFromDepthPhases = None
             t = seiscomp.core.Time.GMT().toString("%F %T")
-            with open(workingDir / "depth.log", "a") as f:
+            with open(self.workingDir / "depth.log", "a") as f:
                 if depthFromDepthPhases is not None:
                     seiscomp.logging.info("DEPTH=%.1f" % depthFromDepthPhases)
                     f.write("%s %s   %5.1f km\n" % (t, eventID, depthFromDepthPhases))

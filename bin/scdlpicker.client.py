@@ -29,8 +29,7 @@ import scdlpicker.inventory as _inventory
 import scdlpicker.util as _util
 import scdlpicker.dbutil as _dbutil
 import scdlpicker.eventworkspace as _ews
-import scdlpicker.defaults as _defaults
-
+import scdlpicker.config as _config
 
 # Below are parameters that for the time being are hardcoded.
 
@@ -43,7 +42,7 @@ author = "dlpicker"
 streamTimeout = 5
 
 # Send new picks to this group.
-messagingGroup = "MLTEST"
+targetMessagingGroup = "MLTEST"
 
 # Ignore objects (picks, origins) from these authors
 ignoredAuthors = [ ]
@@ -172,15 +171,10 @@ class App(seiscomp.client.Application):
             return False
 
         try:
-            self.workingDir = self.configGetString("scdlpicker.workingDir")
-        except RuntimeError:
-            self.workingDir = _defaults.workingDir
-
-        try:
-            self.messagingGroup = \
+            self.targetMessagingGroup = \
                 self.configGetString("scdlpicker.messagingGroup")
         except RuntimeError:
-            self.messagingGroup = messagingGroup
+            self.targetMessagingGroup = targetMessagingGroup
 
         try:
             self.ignoredAuthors = \
@@ -237,7 +231,7 @@ class App(seiscomp.client.Application):
         info("agency = " + self.agencyID())
         info("author = " + self.author())
         info("workingDir = " + str(self.workingDir))
-        info("messagingGroup = " + str(self.messagingGroup))
+        info("messagingGroup = " + str(self.targetMessagingGroup))
         info("ignoredAuthors = " + str(self.ignoredAuthors))
         info("ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
         info("emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
@@ -267,13 +261,8 @@ class App(seiscomp.client.Application):
         if not super(App, self).validateParameters():
             return False
 
-        try:
-            self.workingDir = self.commandline().optionString("working-dir")
-        except RuntimeError:
-            pass
-
         if self.commandline().hasOption("messaging-group"):
-            self.messagingGroup = self.commandline().optionString("messaging-group")
+            self.targetMessagingGroup = self.commandline().optionString("messaging-group")
 
         # TODO
         # ignored-authors
@@ -284,7 +273,7 @@ class App(seiscomp.client.Application):
         if not self.commandline().hasOption("event"):
             # not in event mode -> configure the messaging
             self.setMessagingEnabled(True)
-            self.setPrimaryMessagingGroup(self.messagingGroup)
+            self.setPrimaryMessagingGroup(self.targetMessagingGroup)
             self.addMessagingSubscription("PICK")
             self.addMessagingSubscription("LOCATION")
             self.addMessagingSubscription("EVENT")
@@ -295,20 +284,22 @@ class App(seiscomp.client.Application):
         if not super(App, self).init():
             return False
 
-        self.workingDir = pathlib.Path(self.workingDir).expanduser()
+        commonConfig = _config.getCommonConfig(self)
+
+        self.workingDir = commonConfig.workingDir
 
         # This is the directory where all the event data are written to.
-        self.eventRootDir = self.workingDir / "events"
+        self.eventRootDir = commonConfig.workingDir / "events"
 
         # This is the directory in which we create symlinks pointing to
         # data we need to work on.
-        self.spoolDir = self.workingDir / "spool"
+        self.spoolDir = commonConfig.workingDir / "spool"
 
         # This is the directory in which results are placed by the repicker
-        self.outgoingDir = self.workingDir / "outgoing"
+        self.outgoingDir = commonConfig.workingDir / "outgoing"
 
         # After sending the data to the messaging, the file is move to here.
-        self.sentDir = self.workingDir / "sent"
+        self.sentDir = commonConfig.workingDir / "sent"
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
