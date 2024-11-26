@@ -58,19 +58,8 @@ ignoredAgencyIDs = []
 # want to search for matching, previously missed picks.
 emptyOriginAgencyIDs = []
 
-# We can look for unpicked arrivals at additional stations.
-tryUpickedStations = True
-
-# We need a more convenient config for that:
-global_net_sta_blacklist = [
-    # bad components
-    ("WA", "ZON"),
-]
-
-
-# Normally no need to change this
+# DON'T change this
 timeoutInterval = 1
-
 
 
 def alreadyRepicked(pick):
@@ -83,7 +72,7 @@ def alreadyRepicked(pick):
     pass  # TODO
 
 
-def isRepick(pick):
+def isRepick(pick, author=None):
     """
     Is this already a repick?
     """
@@ -96,7 +85,7 @@ def isRepick(pick):
         pass
 
     try:
-        if pick.creationInfo().author() == author:
+        if author is not None and pick.creationInfo().author() == author:
             return True
     except (AttributeError, ValueError):
         pass
@@ -136,7 +125,6 @@ class App(seiscomp.client.Application):
         self.ignoredAuthors = ignoredAuthors
         self.ignoredAgencyIDs = ignoredAgencyIDs
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
-        self.tryUpickedStations = tryUpickedStations
 
         super().__init__(argc, argv)
         self.setDatabaseEnabled(True, True)
@@ -156,11 +144,6 @@ class App(seiscomp.client.Application):
         # that require processing but we delay processing until
         # previous events are finished.
         self.pendingEvents = dict()
-
-        # This is the time window that we request for each repick.
-        # Depending on the use case this may be shorter (or longer)
-        self.beforeP = 60.
-        self.afterP = 60.
 
         self.ttt = None
 
@@ -199,46 +182,26 @@ class App(seiscomp.client.Application):
         self.emptyOriginAgencyIDs = list(emptyOriginAgencyIDs)
 
         try:
-            self.beforeP = self.configGetDouble("scdlpicker.beforeP")
-        except RuntimeError:
-            pass
-
-        try:
-            self.afterP = self.configGetDouble("scdlpicker.afterP")
-        except RuntimeError:
-            pass
-
-        try:
             self.streamTimeout = self.configGetDouble("scdlpicker.streamTimeout")
         except RuntimeError:
             self.streamTimeout = streamTimeout
-
-        try:
-            self.tryUpickedStations = \
-                self.configGetBool("scdlpicker.tryUpickedStations")
-        except RuntimeError:
-            self.tryUpickedStations = tryUpickedStations
-
-        try:
-            self.earthModel = self.configGetString("scdlpicker.earthModel")
-        except RuntimeError:
-            self.earthModel = "iasp91"
 
         return True
 
     def dumpConfiguration(self):
         info = seiscomp.logging.info
-        info("agency = " + self.agencyID())
-        info("author = " + self.author())
-        info("workingDir = " + str(self.workingDir))
-        info("messagingGroup = " + str(self.targetMessagingGroup))
-        info("ignoredAuthors = " + str(self.ignoredAuthors))
-        info("ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
-        info("emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
-        info("tryUpickedStations = " + str(self.tryUpickedStations))
-        info("beforeP = " + str(self.beforeP))
-        info("afterP = " + str(self.afterP))
-        info("streamTimeout = " + str(self.streamTimeout))
+
+        info("Global parameters")
+        info("  agency = " + self.agencyID())
+        info("  author = " + self.author())
+        self.commonConfig.dump(info)
+        self.pickingConfig.dump(info)
+        info("Local parameters")
+        info("  messagingGroup = " + str(self.targetMessagingGroup))
+        info("  ignoredAuthors = " + str(self.ignoredAuthors))
+        info("  ignoredAgencyIDs = " + str(self.ignoredAgencyIDs))
+        info("  emptyOriginAgencyIDs = " + str(self.emptyOriginAgencyIDs))
+        info("  streamTimeout = " + str(self.streamTimeout))
 
     def createCommandLineDescription(self):
         self.commandline().addGroup("Config")
@@ -284,22 +247,25 @@ class App(seiscomp.client.Application):
         if not super(App, self).init():
             return False
 
-        commonConfig = _config.getCommonConfig(self)
+        self.commonConfig = _config.getCommonConfig(self)
 
-        self.workingDir = commonConfig.workingDir
+        self.workingDir = self.commonConfig.workingDir
 
         # This is the directory where all the event data are written to.
-        self.eventRootDir = commonConfig.workingDir / "events"
+        self.eventRootDir = self.commonConfig.workingDir / "events"
 
         # This is the directory in which we create symlinks pointing to
         # data we need to work on.
-        self.spoolDir = commonConfig.workingDir / "spool"
+        self.spoolDir = self.commonConfig.workingDir / "spool"
 
         # This is the directory in which results are placed by the repicker
-        self.outgoingDir = commonConfig.workingDir / "outgoing"
+        self.outgoingDir = self.commonConfig.workingDir / "outgoing"
 
         # After sending the data to the messaging, the file is move to here.
-        self.sentDir = commonConfig.workingDir / "sent"
+        self.sentDir = self.commonConfig.workingDir / "sent"
+
+        self.pickingConfig = _config.getPickingConfig(self)
+        self.relocationConfig = _config.getRelocationConfig(self)
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
 
@@ -307,7 +273,7 @@ class App(seiscomp.client.Application):
         now = seiscomp.core.Time.GMT()
         self.components = _inventory.streamComponents(
             self.inventory, now,
-            net_sta_blacklist=global_net_sta_blacklist)
+            net_sta_blacklist=self.commonConfig.stationBlacklist)
 
         configModule = self.configModule()
         myName = self.name()
@@ -389,7 +355,7 @@ class App(seiscomp.client.Application):
     def computeTravelTimes(self, delta, depth):
         if self.ttt is None:
             self.ttt = seiscomp.seismology.TravelTimeTable()
-            self.ttt.setModel(self.earthModel)
+            self.ttt.setModel(self.commonConfig.earthModel)
 
         arrivals = self.ttt.compute(0, 0, depth, 0, delta, 0, 0)
         return arrivals
@@ -497,8 +463,8 @@ class App(seiscomp.client.Application):
                 continue
 
             t0 = pick.time().value()
-            t1 = t0 + seiscomp.core.TimeSpan(-self.beforeP)
-            t2 = t0 + seiscomp.core.TimeSpan(+self.afterP)
+            t1 = t0 + seiscomp.core.TimeSpan(-self.pickingConfig.beforeP)
+            t2 = t0 + seiscomp.core.TimeSpan(+self.pickingConfig.afterP)
             if (net, sta, loc, cha[:2]) not in self.components:
                 # This may occur if a station was (1) blacklisted or (2) added
                 # to the processing later on. Either way we skip this pick.
@@ -752,7 +718,7 @@ class App(seiscomp.client.Application):
                     "Skipping previously attempted repick "+pickID)
                 continue
 
-            if isRepick(pick):
+            if isRepick(pick, author=self.author()):
                 seiscomp.logging.debug("Skipping repick "+pickID)
                 continue
 
@@ -819,7 +785,7 @@ class App(seiscomp.client.Application):
             if maxDelta > 40:
                 maxDelta = 105
 
-        if tryUpickedStations:
+        if self.pickingConfig.tryUpickedStations:
             # TODO: delay
             predictedPicks = self.findUnpickedStations(
                 workspace.origin, maxDelta, workspace.all_picks)

@@ -15,6 +15,19 @@ class CommonConfig:
         # 'cpu' is the more conservative setting that should run everywhere.
         self.device = "cpu"
 
+        # The Earth model used. Currently ONLY iasp91 and ak135 are supported!
+        self.earthModel = "iasp91"
+
+        # Station blacklist. List of (net, sta) tuples
+        self.stationBlacklist = []
+
+    def dump(self, out=print):
+        out("Common config parameters:")
+        out("  workingDir = " + str(self.workingDir))
+        out("  device = " + self.device)
+        out("  earthModel = " + self.earthModel)
+        out("  stationBlacklist = " + str(self.stationBlacklist))
+
 
 class PickingConfig:
     """
@@ -30,6 +43,15 @@ class PickingConfig:
         # Model used for repicking
         self.modelName = "eqtransformer"
 
+        # Time window used for repicking
+        # Times are relative to the P arrival (picked or predicted).
+        # Depending on the use case this may be shorter or longer.
+        # Only change if you know exactly what you are doing!
+        self.beforeP = 60
+        self.afterP = 60.
+
+        self.tryUpickedStations = True
+
         self.minConfidence = 0.4
 
         self.batchSize = 1
@@ -39,6 +61,18 @@ class PickingConfig:
 
         # The author ID that all new picks will have
         self.pickAuthor = "dlpicker"
+
+    def dump(self, out=print):
+        out("Picking config parameters:")
+        out("  beforeP = " + str(self.beforeP))
+        out("  afterP = " + str(self.afterP))
+        out("  tryUpickedStations = " + str(self.tryUpickedStations))
+        out("  modelName = " + str(self.modelName))
+        out("  dataset = " + str(self.dataset))
+        out("  minConfidence = " + str(self.minConfidence))
+        out("  batchSize = " + str(self.batchSize))
+        out("  targetMessagingGroup = " + str(self.targetMessagingGroup))
+        out("  pickAuthor = " + str(self.pickAuthor))
 
 
 class RelocationConfig:
@@ -65,7 +99,9 @@ class RelocationConfig:
         self.maxDelta = 105.
 
         # List of allowed pick authors.
-        self.pickAuthors = ["dlpicker"]
+        self.pickAuthors = ["dlpicker"]  # TODO: review!
+
+        self.minDelay = 20*60  # 20 minutes!
 
 
 def getCommonConfig(app):
@@ -107,6 +143,23 @@ def getCommonConfig(app):
         config.device = device
 
     config.device = config.device.lower()
+
+    # earthModel
+
+    try:
+        config.earthModel = app.configGetString("scdlpicker.earthModel")
+    except RuntimeError:
+        pass
+    # TODO: CLI?
+
+    # stationBlacklist
+
+    try:
+        config.stationBlacklist = app.configGetStrings("scdlpicker.stationBlacklist")
+    except RuntimeError:
+        pass
+    config.stationBlacklist = [ tuple(item.split(".")) for item in config.stationBlacklist ]
+    # TODO: CLI?
 
     return config
 
@@ -152,6 +205,27 @@ def getPickingConfig(app):
     except RuntimeError:
         pass
 
+    try:
+        config.beforeP = app.configGetDouble("scdlpicker.beforeP")
+    except RuntimeError:
+        pass
+    # TODO: CLI?
+    # TODO: Rename to scdlpicker.repicking.beforeP
+
+    try:
+        config.afterP = app.configGetDouble("scdlpicker.afterP")
+    except RuntimeError:
+        pass
+    # TODO: CLI?
+    # TODO: Rename to scdlpicker.repicking.afterP
+
+    try:
+        config.tryUpickedStations = app.configGetBool("scdlpicker.tryUpickedStations")
+    except RuntimeError:
+        pass
+    # TODO: CLI?
+    # TODO: Rename to scdlpicker.repicking.tryUpickedStations
+
     return config
 
 
@@ -192,6 +266,26 @@ def getRelocationConfig(app):
         pass
     try:
         config.maxDelta = app.commandline().optionDouble("max-delta")
+    except RuntimeError:
+        pass
+
+    try:
+        config.pickAuthors = app.configGetDouble("scdlpicker.relocation.pickAuthors")
+    except RuntimeError:
+        pass
+    try:
+        config.pickAuthors = app.commandline().optionString("pick-authors")
+        config.pickAuthors = config.pickAuthors.split()
+    except RuntimeError:
+        pass
+    config.pickAuthors = list(config.pickAuthors)
+
+    try:
+        config.minDelay = app.configGetDouble("scdlpicker.relocation.minDelay")
+    except RuntimeError:
+        pass
+    try:
+        config.minDelay = app.commandline().optionString("min-delay")
     except RuntimeError:
         pass
 

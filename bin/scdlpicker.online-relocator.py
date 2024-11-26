@@ -73,11 +73,6 @@ class App(seiscomp.client.Application):
         self.addMessagingSubscription("LOCATION")
         self.addMessagingSubscription("EVENT")
 
-        self.minDelay = 20*60  # 20 minutes!
-
-        # List of allowed pick authors.
-        self.pickAuthors = ["dlpicker"]
-
         # Keep track of changes of the preferred origin of each event
         self.preferredOrigins = dict()
 
@@ -128,45 +123,6 @@ class App(seiscomp.client.Application):
             "limit the pick residual RMS to the specified value (in seconds)")
         self.commandline().addOption(
             "Target", "test", "test mode - don't send the result")
-
-    def initConfiguration(self):
-        # Called before validateParameters()
-
-        if not super(App, self).initConfiguration():
-            return False
-
-        try:
-            self.pickAuthors = self.configGetDouble("scdlpicker.relocation.pickAuthors")
-        except RuntimeError:
-            pickAuthors = ["dlpicker"]
-        self.pickAuthors = list(self.pickAuthors)
-
-        try:
-            self.minDelay = self.configGetDouble("scdlpicker.relocation.minDelay")
-        except RuntimeError:
-            pass
-
-        return True
-
-    def validateParameters(self):
-        """
-        Command-line parameters
-        """
-        if not super(App, self).validateParameters():
-            return False
-
-        try:
-            self.minDelay = self.commandline().optionString("min-delay")
-        except RuntimeError:
-            pass
-
-        try:
-            pickAuthors = self.commandline().optionString("pick-authors")
-            pickAuthors = pickAuthors.split()
-        except RuntimeError:
-            pickAuthors = ["dlpicker"]
-
-        return True
 
     def init(self):
         if not super(App, self).init():
@@ -255,7 +211,7 @@ class App(seiscomp.client.Application):
         org = self.origins[preferredOriginID]
         now = seiscomp.core.Time.GMT()
         dt = float(now - org.time().value())
-        if dt < self.minDelay:
+        if dt < self.relocationConfig.minDelay:
             return False
 
         try:
@@ -391,7 +347,7 @@ class App(seiscomp.client.Application):
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
                 origin, self.inventory,
-                self.pickAuthors, self.relocationConfig.maxDelta, self.relocationConfig.maxResidual, self.query())
+                self.relocationConfig.pickAuthors, self.relocationConfig.maxDelta, self.relocationConfig.maxResidual, self.query())
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 

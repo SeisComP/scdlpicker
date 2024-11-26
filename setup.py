@@ -6,7 +6,7 @@ module_name = "scdlpicker"
 setup(
     name='scdlpicker',
 
-    version="0.3.2",
+    version="0.3.4",
 
     description="scdlpicker: A Python package to enable seismic phase picking based on deep-learning in SeisComP",
 
