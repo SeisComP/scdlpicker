@@ -52,6 +52,9 @@ class PickingConfig:
 
         self.tryUpickedStations = True
 
+        # Ignore manual picks, i.e. don't repick them.
+        self.repickManualPicks = False
+
         self.minConfidence = 0.4
 
         self.batchSize = 1
@@ -67,6 +70,7 @@ class PickingConfig:
         out("  beforeP = " + str(self.beforeP))
         out("  afterP = " + str(self.afterP))
         out("  tryUpickedStations = " + str(self.tryUpickedStations))
+        out("  repickManualPicks = " + str(self.repickManualPicks))
         out("  modelName = " + str(self.modelName))
         out("  dataset = " + str(self.dataset))
         out("  minConfidence = " + str(self.minConfidence))
@@ -197,7 +201,7 @@ def getPickingConfig(app):
 
 
     try:
-        config.minConfidence = app.configGetString("scdlpicker.picking.minConfidence")
+        config.minConfidence = app.configGetDouble("scdlpicker.picking.minConfidence")
     except RuntimeError:
         pass
     try:
@@ -206,25 +210,28 @@ def getPickingConfig(app):
         pass
 
     try:
-        config.beforeP = app.configGetDouble("scdlpicker.beforeP")
+        config.beforeP = app.configGetDouble("scdlpicker.repicking.beforeP")
     except RuntimeError:
         pass
     # TODO: CLI?
-    # TODO: Rename to scdlpicker.repicking.beforeP
 
     try:
-        config.afterP = app.configGetDouble("scdlpicker.afterP")
+        config.afterP = app.configGetDouble("scdlpicker.repicking.afterP")
     except RuntimeError:
         pass
     # TODO: CLI?
-    # TODO: Rename to scdlpicker.repicking.afterP
 
     try:
-        config.tryUpickedStations = app.configGetBool("scdlpicker.tryUpickedStations")
+        config.tryUpickedStations = app.configGetBool("scdlpicker.repicking.tryUpickedStations")
     except RuntimeError:
         pass
     # TODO: CLI?
-    # TODO: Rename to scdlpicker.repicking.tryUpickedStations
+
+    try:
+        config.repickManualPicks = app.configGetBool("scdlpicker.repicking.repickManualPicks")
+    except RuntimeError:
+        pass
+    # TODO: CLI?
 
     return config
 
