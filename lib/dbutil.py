@@ -33,42 +33,17 @@ def loadEvent(query, publicID):
 
     Uses loadObject() to also load the children.
     """
-    tp = seiscomp.datamodel.Event
-    t0 = time.time()
-    obj = query.loadObject(tp.TypeInfo(), publicID)
-    dt = time.time() - t0
-    msg =  "query took %.3f sec for event '%s'" % (dt, publicID)
-    log = seiscomp.logging.warning if dt > 0.1 else seiscomp.logging.debug
-    log(msg)
-
-    obj = tp.Cast(obj)
-    if obj:
-        if obj.eventDescriptionCount() == 0:
-            query.loadEventDescriptions(obj)
-    else:
-        seiscomp.logging.error("unknown Event '%s'" % publicID)
-    return obj
+    obj = query.loadObject(seiscomp.datamodel.Event.TypeInfo(), eventID)
+    event = seiscomp.datamodel.Event.Cast(obj)
+    if event:
+        if event.eventDescriptionCount() == 0:
+            query.loadEventDescriptions(event)
+        return event
 
 
-def loadOrigin(query, publicID):
-    # load an Origin object from database
-    tp = seiscomp.datamodel.Origin
-    t0 = time.time()
-    obj = query.loadObject(tp.TypeInfo(), publicID)
-    dt = time.time() - t0
-    msg =  "query took %.3f sec for event '%s'" % (dt, publicID)
-    log = seiscomp.logging.warning if dt > 0.1 else seiscomp.logging.debug
-    log(msg)
-
-    obj = tp.Cast(obj)
-    if obj is None:
-        seiscomp.logging.error("unknown Origin '%s'" % publicID)
-    return obj
-
-
-def loadOriginWithoutArrivals(query, orid, strip=False):
+def loadBareOrigin(query, orid):
     """
-    Retrieve origin from DB *without* children
+    Retrieve 'bare' origin from DB, i.e. without children
 
     Returns either the origin instance
     or None if origin could not be loaded.
@@ -285,3 +260,282 @@ def loadPicksForOrigin(origin, inventory, allowedAuthorIDs, maxDelta, maxResidua
             seiscomp.logging.warning("Pick '"+pickID+"' NOT FOUND")
 
     return origin, picks
+
+
+def loadCompleteEvent(
+        query, eventID,
+        preferredOriginID=None,
+        preferredMagnitudeID=None,
+        preferredFocalMechanismID=None,
+        comments=False, allmagnitudes=False,
+        withPicks=False, preferred=False):
+    """
+    Load a "complete" event from the database via the specified
+    query.
+
+    "Complete" here means Event with preferred Origin, Magnitude,
+    FocalMechanism, Picks, Amplitudes, etc. but not all Origins etc.
+    Only what filly represents all the preferred children.
+
+    It is possible to override the preferredOriginID,
+    preferredMagnitudeID and preferredFocalMechanismID.
+
+    Things to do:
+    * load event
+    * load preferred origin without arrivals
+    * load at least the preferred magnitude if available, all
+      magnitudes if requested
+    * load focal mechanism incl. moment tensor depending on availability,
+      incl. Mw from derived origin
+    """
+
+    ep = EventParameters()
+    # Load event and preferred origin. This is the minimum
+    # required info and if it can't be loaded, give up.
+    event = loadEvent(query, eventID)
+    if event is None:
+        msg = "unknown event '" + eventID + "'"
+        # seiscomp.logging.error(msg)
+        raise ValueError(msg)
+
+    # We have the possibility to override the preferredOriginID etc.
+    # but need to do this at the beginning.
+    if preferredOriginID:
+        event.setPreferredOriginID(preferredOriginID)
+    if preferredMagnitudeID:
+        event.setPreferredMagnitudeID(preferredMagnitudeID)
+    if preferredFocalMechanismID:
+        event.setPreferredFocalMechanismID(preferredFocalMechanismID)
+
+    origins = dict()
+    focalMechanisms = dict()
+
+    preferredOrigin = None
+    preferredFocalMechanism = None
+
+    # Load all origins that are children of EventParameters. Currently
+    # this does not load derived origins because for these there is no
+    # originReference created, which is probably a bug. FIXME!
+    for origin in query.getOrigins(eventID):
+        origin = Origin.Cast(origin)
+        # The origin is bare minimum without children.
+        # No arrivals, magnitudes, comments... will load those later.
+        if not origin:
+            continue
+        origins[origin.publicID()] = origin
+
+    # Load all focal mechanisms and then load moment tensor children
+    for focalMechanism in query.getFocalMechanismsDescending(eventID):
+        focalMechanism = FocalMechanism.Cast(focalMechanism)
+        if not focalMechanism:
+            continue
+        focalMechanisms[focalMechanism.publicID()] = focalMechanism
+    for focalMechanismID in focalMechanisms:
+        focalMechanism = focalMechanisms[focalMechanismID]
+        query.loadMomentTensors(focalMechanism)
+        # query.loadComments(focalMechanism)
+
+
+    # Load triggering and derived origins for all focal mechanisms and moment tensors
+    #
+    # A derived origin may act as a triggering origin of another focal mechanisms.
+    for focalMechanismID in focalMechanisms:
+        focalMechanism = focalMechanisms[focalMechanismID]
+
+        for i in range(focalMechanism.momentTensorCount()):
+            momentTensor = focalMechanism.momentTensor(i)
+            if momentTensor.derivedOriginID():
+                derivedOriginID = momentTensor.derivedOriginID()
+                # assert derivedOriginID not in origins
+
+                if derivedOriginID not in origins:
+                    derivedOrigin = loadBareOrigin(query, derivedOriginID)
+                    if derivedOrigin is None:
+                        seiscomp.logging.warning("%s: failed to load derived origin %s" % (eventID, derivedOriginID))
+                    else:
+                        stripOrigin(derivedOrigin)
+                        origins[derivedOriginID] = derivedOrigin
+
+        triggeringOriginID = focalMechanism.triggeringOriginID()
+        if triggeringOriginID not in origins:
+            # Actually not unusual. Happens if a derived origin is used as
+            # triggering origin, as for the derived origins there is no
+            # OriginReference. So rather than a warning we only issue a
+            # debug message.
+            #
+            seiscomp.logging.debug("%s: triggering origin %s not in origins" % (eventID, triggeringOriginID))
+            triggeringOrigin = loadBareOrigin(query, triggeringOriginID)
+            if triggeringOrigin is None:
+                seiscomp.logging.warning("%s: failed to load triggering origin %s" % (eventID, triggeringOriginID))
+            else:
+                stripOrigin(triggeringOrigin)
+                origins[triggeringOriginID] = triggeringOrigin
+
+    # Load arrivals, comments, magnitudes into origins
+    for originID in origins:
+        origin = origins[originID]
+
+        if withPicks:
+            query.loadArrivals(origin)
+        if comments:
+            query.loadComments(origin)
+        query.loadMagnitudes(origin)
+
+    if event.preferredOriginID():
+        preferredOriginID = event.preferredOriginID()
+    else:
+        preferredOriginID = None
+
+    if preferredOrigin is None:
+        if preferredOriginID and preferredOriginID in origins:
+            preferredOrigin = origins[preferredOriginID]
+        if preferredOrigin is None:
+            raise RuntimeError(
+                "preferred origin '" + preferredOriginID + "' not found")
+
+    # Load all magnitudes for all loaded origins
+    magnitudes = dict()
+    if allmagnitudes:
+        for originID in origins:
+            origin = origins[originID]
+            for i in range(origin.magnitudeCount()):
+                magnitude = origin.magnitude(i)
+                magnitudes[magnitude.publicID()] = magnitude
+    # TODO station magnitudes
+
+    preferredMagnitude = None
+    if event.preferredMagnitudeID():
+        if event.preferredMagnitudeID() in magnitudes:
+            preferredMagnitude = magnitudes[event.preferredMagnitudeID()]
+#       for magnitudeID in magnitudes:
+#           magnitude = magnitudes[magnitudeID]
+#           if magnitude.publicID() == event.preferredMagnitudeID():
+#               preferredMagnitude = magnitude
+        if not preferredMagnitude:
+            seiscomp.logging.warning("%s: magnitude %s not found" % (eventID, event.preferredMagnitudeID()))
+            # Try to load from memory
+            preferredMagnitude = Magnitude.Find(event.preferredMagnitudeID())
+        if not preferredMagnitude:
+            seiscomp.logging.warning("%s: magnitude %s not found in memory either" % (eventID, event.preferredMagnitudeID()))
+            # Load it from database
+            preferredMagnitude = loadMagnitude(query, event.preferredMagnitudeID())
+        if not preferredMagnitude:
+            seiscomp.logging.warning("%s: magnitude %s not found in database either" % (eventID, event.preferredMagnitudeID()))
+
+    # Load focal mechanism, moment tensor, moment magnitude and related origins
+    momentTensor = momentMagnitude = derivedOrigin = triggeringOrigin = None
+#   preferredFocalMechanism = loadFocalMechanism(
+#       query, event.preferredFocalMechanismID())
+    if event.preferredFocalMechanismID():
+        preferredFocalMechanism = focalMechanisms[event.preferredFocalMechanismID()]
+#   if preferredFocalMechanism:
+        for i in range(preferredFocalMechanism.momentTensorCount()):
+            momentTensor = preferredFocalMechanism.momentTensor(i)
+            stripMomentTensor(momentTensor)
+
+        if preferredFocalMechanism.triggeringOriginID():
+            if event.preferredOriginID() == preferredFocalMechanism.triggeringOriginID():
+                triggeringOrigin = preferredOrigin
+            else:
+                if preferredFocalMechanism.triggeringOriginID() in origins:
+                    triggeringOrigin = origins[preferredFocalMechanism.triggeringOriginID()]
+                else:
+                    triggeringOrigin = None
+
+                if not triggeringOrigin:
+                    seiscomp.logging.warning("triggering origin %s not in origins" % preferredFocalMechanism.triggeringOriginID())
+                if not triggeringOrigin:
+                    triggeringOrigin = loadBareOrigin(
+                        query, preferredFocalMechanism.triggeringOriginID(), strip=True)
+                if not triggeringOrigin:
+                    seiscomp.logging.warning("triggering origin %s not in database either" % preferredFocalMechanism.triggeringOriginID())
+                    raise RuntimeError()
+
+            # TODO: Strip triggering origin if it is not the preferred origin
+
+        if preferredFocalMechanism.momentTensorCount() > 0:
+            # FIXME What if there is more than one MT?
+            momentTensor = preferredFocalMechanism.momentTensor(0)
+            if momentTensor.derivedOriginID():
+                if momentTensor.derivedOriginID() not in origins:
+                    seiscomp.logging.warning("momentTensor.derivedOriginID() not in origins")
+                    derivedOrigin = loadBareOrigin(
+                        query, momentTensor.derivedOriginID(), strip=True)
+                    origins[momentTensor.derivedOriginID()] = derivedOrigin
+            if momentTensor.momentMagnitudeID():
+                if momentTensor.momentMagnitudeID() == \
+                        event.preferredMagnitudeID():
+                    momentMagnitude = preferredMagnitude
+                else:
+                    momentMagnitude = loadMagnitude(
+                        query, momentTensor.momentMagnitudeID())
+
+        # Take care of FocalMechanism and related references
+#       if derivedOrigin:
+#           event.add(OriginReference(derivedOrigin.publicID()))
+#       if triggeringOrigin:
+#           if event.preferredOriginID() != triggeringOrigin.publicID():
+#               event.add(OriginReference(triggeringOrigin.publicID()))
+        while (event.focalMechanismReferenceCount() > 0):
+            event.removeFocalMechanismReference(0)
+        if preferredFocalMechanism:
+            event.add(FocalMechanismReference(preferredFocalMechanism.publicID()))
+
+    # Strip creation info
+    includeFullCreationInfo = True
+    if not includeFullCreationInfo:
+        stripAuthorInfo(event)
+
+#       if preferredFocalMechanism:
+#           stripCreationInfo(preferredFocalMechanism)
+#           for i in range(preferredFocalMechanism.momentTensorCount()):
+#               stripCreationInfo(preferredFocalMechanism.momentTensor(i))
+        for org in [ preferredOrigin, triggeringOrigin, derivedOrigin ]:
+            if org is not None:
+                stripAuthorInfo(org)
+                for i in range(org.magnitudeCount()):
+                    stripAuthorInfo(org.magnitude(i))
+
+    picks = dict()
+    ampls = dict()
+    if withPicks:
+        for originID in origins:
+            for pick in query.getPicks(originID):
+                pick = Pick.Cast(pick)
+                if pick.publicID() not in picks:
+                    picks[pick.publicID()] = pick
+            for ampl in query.getAmplitudesForOrigin(origin.publicID()):
+                ampl = Amplitude.Cast(ampl)
+                if ampl.publicID() not in ampls:
+                    ampls[ampl.publicID()] = ampl
+
+    # Populate EventParameters instance
+    ep.add(event)
+#   if preferredMagnitude and preferredMagnitude is not momentMagnitude:
+#       preferredOrigin.add(preferredMagnitude)
+
+    while (event.originReferenceCount() > 0):
+        event.removeOriginReference(0)
+    for originID in origins:
+        event.add(OriginReference(originID))
+        ep.add(origins[originID])
+
+    if preferredFocalMechanism:
+#       if triggeringOrigin:
+#           if triggeringOrigin is not preferredOrigin:
+#               ep.add(triggeringOrigin)
+        if derivedOrigin:
+            if momentMagnitude:
+                derivedOrigin.add(momentMagnitude)
+#           ep.add(derivedOrigin)
+        ep.add(preferredFocalMechanism)
+
+    for pickID in picks:
+        ep.add(picks[pickID])
+    for amplID in ampls:
+        ep.add(ampls[amplID])
+
+    if not comments:
+        scstuff.util.recursivelyRemoveComments(ep)
+
+    return ep

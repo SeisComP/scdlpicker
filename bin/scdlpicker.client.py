@@ -45,11 +45,11 @@ streamTimeout = 5
 targetMessagingGroup = "MLTEST"
 
 # Ignore objects (picks, origins) from these authors
-ignoredAuthors = [ ]
+ignoredAuthors = []
 
 # We may receive origins from other agencies, but don't want to
 # process them. Add the agency ID's here. Any origin with agencyID
-# in this list will be ignore.
+# in this list will be ignored.
 ignoredAgencyIDs = []
 
 # We normally never process empty origins. However, we may receive
@@ -91,29 +91,6 @@ def isRepick(pick, author=None):
         pass
 
     return False
-
-
-def gappy(waveforms, tolerance=0.5):
-    """
-    Check if there are any gaps in the waveforms. The waveforms
-    argument is an ordered sequence of Record objects from the same
-    stream, i.e. all with same NSLC.
-
-    The tolerance is specified in multiples of the sampling interval.
-    The default is half of a sampling interval.
-
-    The records are assumed to be sorted in time and not multiplexed.
-    """
-
-    prev = None
-    gapCount = 0
-    for rec in waveforms:
-        if prev:
-            dt = float(rec.startTime() - prev.endTime())
-            if abs(dt)*rec.samplingFrequency() > tolerance:
-                gapCount += 1
-        prev = rec
-    return gapCount
 
 
 class App(seiscomp.client.Application):
@@ -518,7 +495,7 @@ class App(seiscomp.client.Application):
             gappyStreams = []
             for streamID in waveforms:
                 waveforms[streamID] = _util.prepare(waveforms[streamID])
-                if gappy(waveforms[streamID], tolerance=1.):
+                if _util.gappy(waveforms[streamID], tolerance=1.):
                     gappyStreams.append(streamID)
             for streamID in gappyStreams:
                 seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
@@ -698,10 +675,7 @@ class App(seiscomp.client.Application):
                 workspace.all_picks[pickID] = pick
                 seiscomp.logging.debug("Added to workspace pick "+pickID)
 
-            # We usually don't re-pick manual picks.
-            # Perhaps add option to allow that.
-            skipManualPicks = False
-            if _util.manual(pick) and skipManualPicks:
+            if _util.manual(pick) and not self.pickingConfig.repickManualPicks:
                 seiscomp.logging.debug("Skipping manual pick "+pickID)
                 continue
 
@@ -746,8 +720,7 @@ class App(seiscomp.client.Application):
             workspace.waveforms[streamID] = waveforms[streamID]
 
         # #########################################################
-        # Create predictions from theoretical arrivals for stations
-        # where we don't (yet) have measured picks.
+        # Predict arrival times for unpicked stations
         # #########################################################
 
         if origin.creationInfo().agencyID() in emptyOriginAgencyIDs:

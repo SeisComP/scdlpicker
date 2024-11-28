@@ -541,3 +541,26 @@ def readRepickerResults(path):
             pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 
     return picks, comms
+
+
+def gappy(waveforms, tolerance=0.5):
+    """
+    Check if there are any gaps in the waveforms. The waveforms
+    argument is an ordered sequence of Record objects from the same
+    stream, i.e. all with same NSLC.
+
+    The tolerance is specified in multiples of the sampling interval.
+    The default is half of a sampling interval.
+
+    The records are assumed to be sorted in time and not multiplexed.
+    """
+
+    prev = None
+    gapCount = 0
+    for rec in waveforms:
+        if prev:
+            dt = float(rec.startTime() - prev.endTime())
+            if abs(dt)*rec.samplingFrequency() > tolerance:
+                gapCount += 1
+        prev = rec
+    return gapCount

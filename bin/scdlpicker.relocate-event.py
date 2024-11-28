@@ -48,10 +48,6 @@ class RelocatorApp(seiscomp.client.Application):
         self.setLoadInventoryEnabled(True)
         self.setPrimaryMessagingGroup("LOCATION")
 
-        self.minimumDepth = _defaults.minimumDepth
-        self.maxDelta = _defaults.maxDelta
-        self.maxResidual = _defaults.maxResidual
-
         self.allowedAuthorIDs = _defaults.allowedAuthorIDs
 
     def createCommandLineDescription(self):
@@ -195,21 +191,6 @@ class RelocatorApp(seiscomp.client.Application):
             self.fixedDepth = self.commandline().optionDouble("fixed-depth")
         except RuntimeError:
             self.fixedDepth = None
-
-        try:
-            self.maxDelta = self.commandline().optionDouble("max-delta")
-        except RuntimeError:
-            self.maxDelta = _defaults.maxDelta
-
-        try:
-            self.maxResidual = self.commandline().optionDouble("max-residual")
-        except RuntimeError:
-            self.maxResidual = _defaults.maxResidual
-
-        try:
-            self.maxRMS = self.commandline().optionDouble("max-rms")
-        except RuntimeError:
-            self.maxRMS = _defaults.maxRMS
 
         eventIDs = self.commandline().optionString("event").split()
         for eventID in eventIDs:

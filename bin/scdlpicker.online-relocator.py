@@ -44,7 +44,6 @@ import scdlpicker.depth as _depth
 import scstuff.dbutil
 
 
-
 def quality(origin):
     # similar role of origin score in scautoloc
     return _util.arrivalCount(origin)  # to be improved
@@ -128,10 +127,10 @@ class App(seiscomp.client.Application):
         if not super(App, self).init():
             return False
 
-        commonConfig = _config.getCommonConfig(self)
-        self.workingDir = commonConfig.workingDir
+        self.commonConfig = _config.getCommonConfig(self)
+        self.workingDir = self.commonConfig.workingDir
 
-        _depth.initDepthModel(device=commonConfig.device)
+        _depth.initDepthModel(device=self.commonConfig.device)
 
         self.relocationConfig = _config.getRelocationConfig(self)
 
@@ -450,8 +449,17 @@ class App(seiscomp.client.Application):
                     seiscomp.logging.error("DEPTH COMPUTATION FAILED for "+eventID)
                     f.write("%s %s   depth computation failed\n" % (t, eventID))
 
+    def dumpConfiguration(self):
+        info = seiscomp.logging.info
+
+        info("Global parameters")
+        info("  agency = " + self.agencyID())
+        info("  author = " + self.author())
+        self.commonConfig.dump(info)
 
     def run(self):
+        self.dumpConfiguration()
+
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
         try:

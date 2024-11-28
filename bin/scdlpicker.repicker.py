@@ -142,8 +142,8 @@ class RepickerApp(seiscomp.client.Application):
         if not super(RepickerApp, self).init():
             return False
 
-        commonConfig = _config.getCommonConfig(self)
-        self.workingDir = commonConfig.workingDir
+        self.commonConfig = _config.getCommonConfig(self)
+        self.workingDir = self.commonConfig.workingDir
 
         self.pickingConfig = _config.getPickingConfig(self)
 
@@ -156,18 +156,27 @@ class RepickerApp(seiscomp.client.Application):
         self.spoolDir = self.workingDir / "spool"
         self.workspaces = dict()
 
-        if commonConfig.device == "cpu":
+        if self.commonConfig.device == "cpu":
             self.model.cpu()
-        elif commonConfig.device == "gpu":
+        elif self.commonConfig.device == "gpu":
             self.model.cuda()
         else:
-            seiscomp.logging.error("Unknown device " + commonConfig.device)
+            seiscomp.logging.error("Unknown device " + self.commonConfig.device)
             return False
 
         self.expected_input_length_sec = \
             self.model.in_samples / self.model.sampling_rate
 
         return True
+
+    def dumpConfiguration(self):
+        info = seiscomp.logging.info
+
+        info("Global parameters")
+        info("  agency = " + self.agencyID())
+        info("  author = " + self.author())
+        self.commonConfig.dump(info)
+        self.pickingConfig.dump(info)
 
     def _get_stream_from_picks(self, picks, eventID) \
             -> Tuple[obspy.core.stream.Stream, list]:
@@ -471,6 +480,8 @@ class RepickerApp(seiscomp.client.Application):
 
     def run(self):
         """Main loop"""
+
+        self.dumpConfiguration()
 
         while True:
             self._poll()

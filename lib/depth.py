@@ -71,10 +71,8 @@ def get_preferred_origin_seiscomp(ep, eventID):
     Get the preferred origin of specified event from the
     SeisComP EventParameters instance ep.
     """
-#   event = get_event_seiscomp(ep, eventID)
     event = seiscomp.datamodel.Event.Find(eventID)
     assert event is not None
-#   origin = get_origin_seiscomp(ep, event.preferredOriginID())
     origin = seiscomp.datamodel.Origin.Find(event.preferredOriginID())
     return origin
 
@@ -98,10 +96,6 @@ def distances_and_times_from_arrivals_seiscomp(ep, eventID, picks):
     """
     origin = get_preferred_origin_seiscomp(ep, eventID)
 
-#   picks = {}
-#   for i in ep.pickCount():
-#       pick = ep.pick(i)
-#       picks[pickPublicID()] = pick
 
     distances = dict()
     times = dict()
@@ -152,7 +146,6 @@ def computeDepth(ep, eventID, workingDir, seiscomp_workflow=False, debugPlot=Fal
     seiscomp.logging.debug("seiscomp workflow %s" % ("yes" if seiscomp_workflow else "no"))
 
     if seiscomp_workflow:
-        # event = ep.event(0)
         seiscomp.logging.debug("pick count #1 %d" % (ep.pickCount()))
         picks = [ ep.pick(i) for i in range(ep.pickCount()) ]
         picks = {p.publicID(): p for p in picks }
@@ -174,11 +167,6 @@ def computeDepth(ep, eventID, workingDir, seiscomp_workflow=False, debugPlot=Fal
     stream = obspy.read(waveform_files)
     print(stream)
 
-#   for trace in stream:
-#       tpad = 300
-#       npad = int(tpad*trace.stats.sampling_rate)
-#       np.pad(trace.data, tpad)
-#       trace.stats.starttime -= tpad
 
     # We have just read in *all* files in the directory, but not all of these
     # are P picks in the proper distance range. But this is taken care of
@@ -206,7 +194,6 @@ def computeDepth(ep, eventID, workingDir, seiscomp_workflow=False, debugPlot=Fal
 
         try:
             ax.set_xlim(0, 300)
-#           ax.set_xlim(0, 2*depth)
         except ValueError:
             ax.set_xlim(650, 0)
 
