@@ -16,7 +16,7 @@ For pragmatic reasons the workflow was split in two parts.
   to disk to be picked up by the SeisComP client `scdlpicker.client.py`.
 
 Information exchange between these two programs is done in a rather
-primitive yet robust way.
+primitive yet robust way. (Note that in the following the term _automatic picks_ refers to the picks by the configured SeisComP automatic picker.)
 
 * All data needed to perform the repicking, both waveforms and
   parametric data, are stored in files within a user-confugurable
@@ -41,16 +41,18 @@ primitive yet robust way.
   same waveform data repeatedly.
 
 * Parametric data are directly written to the event directory in
-  YAML format. Could also be JSON and format may change in future.
+  YAML format (note that the format may change in future).
   The current strategy is to *not* listen for and dump all automatic
   picks. Instead, we listen for automatic origins and only consider
   the associated automatic picks, thereby focusing on only the
   relevant picks. For large events with many picks we also look for
   additional picks on unpicked streams. As we only consider origins,
   we write the event parameters as one batch per origin, consisting
-  of only picks incl. stream ID, automatic time and public ID. One
-  item per pick. That's currently all the repicker needs in addition
-  to the waveforms.
+  of only picks incl. stream ID, automatic pick time and public ID, i.e., one
+  item per pick. 
+  
+  [comment]: # (That's currently all the repicker needs in addition
+  to the waveforms.)
 
 * In order to help the repicker find new input data and to initiate
   timely repicking, a symbolic link is written to a `spool` directory
@@ -58,24 +60,24 @@ primitive yet robust way.
   parameter data (YAML) file. The repicker thus only needs to
   frequently scan that `spool` directory for symbolic links and after
   finishing work on an item found there, remove the respective link.
-  This is a simple and efficient way of IPC as also used e.g. by some
-  traditional by Unix emailers.
+   
+  [comment]: # (This is a simple and efficient way of IPC as also used e.g. by some
+  traditional by Unix emailers.)
 
-* As described, the repicker scans the `spool` directory and detects
-  presence of a new symbolic link within a second. It then reads the
+* The repicker scans the `spool` directory and detects
+  the presence of a new symbolic link within a second. It then reads the
   respective parameter and waveform data, performs its task and then
   writes the new parameter data (in the same YAML format) to a
-  file in the `outgoing` subdirectory of the event directory, where it
-  is found and processed by the origin client, which removes the file
+  file in the `outgoing` subdirectory of the event directory. The origin client then detects and further processes this file, removing it file
   from the `outgoing` subdirectory once its task of sending the
-  repicker results is completed.
+  repicker results to SeisComP is completed.
 
 * All data used in the repicking, incl. waveforms and parametric data
-  (input and output) are stored and kept in event directories. The
+  (input and output) are stored and kept in the event directories. The
   only files ever removed are the symbolic links in `spool` and
-  `outgoing`. The working directory therefore will accumulate data
-  files and old, unneeded files should be removed from time to time.
-  It is the responsibility of the user to handle this.
+  `outgoing`. This setup allows testing, e.g., with different choices of pick algorithms, and reprocessing but the working directory will therefore accumulate data
+  files. Old, unneeded files should be removed from time to time;
+  it is the responsibility of the user to handle this.
 
 
 ## Example
