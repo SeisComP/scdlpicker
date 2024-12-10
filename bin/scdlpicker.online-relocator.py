@@ -41,17 +41,15 @@ import scdlpicker.util as _util
 import scdlpicker.relocation as _relocation
 import scdlpicker.config as _config
 import scdlpicker.depth as _depth
-import scstuff.dbutil
+##import scstuff.dbutil
 
 
 def quality(origin):
-    # similar role of origin score in scautoloc
-    return _util.arrivalCount(origin)  # to be improved
+    return _util.arrivalCount(origin)
 
 
 def getFixedDepth(origin):
     # Quick hack for SW Poland copper mining region as a test.
-    # TODO: Configurable solution needed!
     lat, lon = origin.latitude().value(), origin.longitude().value()
     if 50 <= lat <= 52 and 15 <= lon <= 20:
         return 1
@@ -201,8 +199,7 @@ class App(seiscomp.client.Application):
         preferredOriginID = evt.preferredOriginID()
         if preferredOriginID not in self.origins:
             seiscomp.logging.debug("Loading origin "+preferredOriginID)
-            org = _dbutil.loadOriginWithoutArrivals(
-                self.query(), preferredOriginID)
+            org = _dbutil.loadOrigin(self.query(), preferredOriginID, full=False)
             if not org:
                 return False
             self.origins[preferredOriginID] = org
@@ -308,14 +305,13 @@ class App(seiscomp.client.Application):
         return q > 1
 
     def processEvent(self, eventID):
-        event = _dbutil.loadEvent(self.query(), eventID)
+        event = _dbutil.loadEvent(self.query(), eventID, full=True)
         if not event:
             seiscomp.logging.warning("Failed to load event " + eventID)
             return
 
-        seiscomp.logging.debug("Loaded event "+eventID)
-        origin = _dbutil.loadOriginWithoutArrivals(
-            self.query(), event.preferredOriginID())
+        seiscomp.logging.debug("Loaded event " + eventID)
+        origin = _dbutil.loadOrigin(self.query(), event.preferredOriginID(), full=False)
         seiscomp.logging.debug("Loaded origin " + origin.publicID())
 
         # Adopt fixed depth according to incoming origin
@@ -338,15 +334,15 @@ class App(seiscomp.client.Application):
 
         if fixedDepth is None:
             seiscomp.logging.debug("not fixing depth")
-            # fixed = False
         else:
             seiscomp.logging.debug("setting fixed depth to %f km" % fixedDepth)
 
         # Load all picks for a matching time span, independent of association.
         originWithArrivals, picks = \
             _dbutil.loadPicksForOrigin(
+                self.query(),
                 origin, self.inventory,
-                self.relocationConfig.pickAuthors, self.relocationConfig.maxDelta, self.relocationConfig.maxResidual, self.query())
+                self.relocationConfig.pickAuthors, self.relocationConfig.maxDelta, self.relocationConfig.maxResidual)
         seiscomp.logging.debug(
             "arrivalCount=%d" % originWithArrivals.arrivalCount())
 
@@ -354,7 +350,6 @@ class App(seiscomp.client.Application):
         depthFromDepthPhases = None
 
         for attempt in ["direct", "depth phase based"]:
-#       for attempt in ["direct"]:
 
             if attempt == "depth phase based":
                 if relocated is None:
@@ -371,7 +366,6 @@ class App(seiscomp.client.Application):
                     break
                 if relocated.depth().value() > 120:
                     seiscomp.logging.debug("no depth phase based attempt (depth > 120)")
-                    # temporarily
                     break
 
                 # adopt the previous relocation result
@@ -398,7 +392,6 @@ class App(seiscomp.client.Application):
 
             if attempt == "direct":
                 if eventID in self.relocated:
-                    # if quality(relocated) <= quality(self.relocated[eventID]):
                     if not self.improvement(self.relocated[eventID], relocated):
                         seiscomp.logging.info(
                             "%s: no improvement - origin not sent" % eventID)
@@ -422,20 +415,14 @@ class App(seiscomp.client.Application):
             self.relocated[eventID] = relocated
 
             if attempt == "depth phase based":
-                # no 2nd attempt using depth phases
                 break
 
-            # Experimental depth computation. Logging only.
             seiscomp.logging.debug("Computing depth for event " + eventID)
             q = self.query()
-            ep = scstuff.dbutil.loadCompleteEvent(q, eventID, withPicks=True, preferred=True)
-            for iorg in range(ep.originCount()):
-                org = ep.origin(iorg)
-                q.loadArrivals(org)  # TEMP HACK!!!!
+            ep = _dbutil.loadEventOriginPicks(q, eventID)
 
             try:
                 depthFromDepthPhases = _depth.computeDepth(ep, eventID, self.workingDir, seiscomp_workflow=True)
-                # depthFromDepthPhases = _depth.computeDepth(ep, eventID, self.workingDir, seiscomp_workflow=True, picks=picks)
             except Exception as e:
                 seiscomp.logging.warning("Caught exception %s" % e)
                 traceback.print_exc()
@@ -446,7 +433,7 @@ class App(seiscomp.client.Application):
                     seiscomp.logging.info("DEPTH=%.1f" % depthFromDepthPhases)
                     f.write("%s %s   %5.1f km\n" % (t, eventID, depthFromDepthPhases))
                 else:
-                    seiscomp.logging.error("DEPTH COMPUTATION FAILED for "+eventID)
+                    seiscomp.logging.error("DEPTH COMPUTATION FAILED for " + eventID)
                     f.write("%s %s   depth computation failed\n" % (t, eventID))
 
     def dumpConfiguration(self):

@@ -327,11 +327,6 @@ class RepickerApp(seiscomp.client.Application):
                 seiscomp.logging.info("RESULT %s  c= %.2f" %
                             (timestamp(ml_time), ml_conf))
 
-                # FIXME: temporary criterion
-                # On one hand we want as small a time window as possible, but
-                # on the other hand it must be large enough to accommodate
-                # residuals due to wrong source depth.
-                # TODO: iterate!
                 dt_max = 10
                 dt = abs(ml_time - obspy.UTCDateTime(triggering_pick.time))
                 if abs(dt) > dt_max:
@@ -347,14 +342,8 @@ class RepickerApp(seiscomp.client.Application):
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
 
-                # The key of the ML pick is the publicID of the
-                # original pick in order to make association easier.
-                # This will later be relevant for relocation, where
-                # we will actually replace existing picks with their
-                # ML equivalent.
                 workspace.mlpicks[pick_id] = new_pick
 
-                # FIXME: For the time being
                 assert new_pick not in new_picks
                 new_picks.append(new_pick)
 
@@ -426,11 +415,6 @@ class RepickerApp(seiscomp.client.Application):
             seiscomp.logging.debug("+++reading %s" % target)
             adhoc_picks = self._readPicksFromYaml(target)
 
-            # FIXME: hackish
-            # The input yaml path name is composed of
-            # /some/folder/name/eventID/in/oneOutOfMany.yaml
-            # so the eventID is always at a fixed position in the
-            # path. This is required.
             assert str(target).endswith(".yaml")
             eventID = str(target).split("/")[-3]
 

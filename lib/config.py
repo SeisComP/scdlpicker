@@ -1,3 +1,20 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+###########################################################################
+# Copyright (C) GFZ Potsdam                                               #
+# All rights reserved.                                                    #
+#                                                                         #
+# Author: Joachim Saul (saul@gfz-potsdam.de)                              #
+#                                                                         #
+# GNU Affero General Public License Usage                                 #
+# This file may be used under the terms of the GNU Affero                 #
+# Public License version 3.0 as published by the Free Software Foundation #
+# and appearing in the file LICENSE included in the packaging of this     #
+# file. Please review the following information to ensure the GNU Affero  #
+# Public License version 3.0 requirements will be met:                    #
+# https://www.gnu.org/licenses/agpl-3.0.html.                             #
+###########################################################################
+
 import pathlib
 
 
@@ -35,8 +52,6 @@ class PickingConfig:
     """
 
     def __init__(self):
-        # defaults
-
         # Data set used for repicking
         self.dataset = "geofon"
 
@@ -85,8 +100,6 @@ class RelocationConfig:
     """
 
     def __init__(self):
-        # defaults
-
         # The minimum depth for a relocation. If the locator locates the
         # depth shallower than this depth, the depth is fixed at this value.
         self.minDepth = 10.
@@ -103,7 +116,7 @@ class RelocationConfig:
         self.maxDelta = 105.
 
         # List of allowed pick authors.
-        self.pickAuthors = ["dlpicker"]  # TODO: review!
+        self.pickAuthors = ["dlpicker"]
 
         self.minDelay = 20*60  # 20 minutes!
 
@@ -154,7 +167,6 @@ def getCommonConfig(app):
         config.earthModel = app.configGetString("scdlpicker.earthModel")
     except RuntimeError:
         pass
-    # TODO: CLI?
 
     # stationBlacklist
 
@@ -163,7 +175,6 @@ def getCommonConfig(app):
     except RuntimeError:
         pass
     config.stationBlacklist = [ tuple(item.split(".")) for item in config.stationBlacklist ]
-    # TODO: CLI?
 
     return config
 
@@ -213,25 +224,21 @@ def getPickingConfig(app):
         config.beforeP = app.configGetDouble("scdlpicker.repicking.beforeP")
     except RuntimeError:
         pass
-    # TODO: CLI?
 
     try:
         config.afterP = app.configGetDouble("scdlpicker.repicking.afterP")
     except RuntimeError:
         pass
-    # TODO: CLI?
 
     try:
         config.tryUpickedStations = app.configGetBool("scdlpicker.repicking.tryUpickedStations")
     except RuntimeError:
         pass
-    # TODO: CLI?
 
     try:
         config.repickManualPicks = app.configGetBool("scdlpicker.repicking.repickManualPicks")
     except RuntimeError:
         pass
-    # TODO: CLI?
 
     return config
 
@@ -248,7 +255,6 @@ def getRelocationConfig(app):
     except RuntimeError:
         pass
 
-    # TODO: Actually use it in the relocation!
     try:
         config.maxRMS = app.configGetDouble("scdlpicker.relocation.maxRMS")
     except RuntimeError:

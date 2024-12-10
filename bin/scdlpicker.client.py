@@ -69,7 +69,7 @@ def alreadyRepicked(pick):
     TODO: check if a repick of this pick exists or has been
     attempted
     """
-    pass  # TODO
+    pass
 
 
 def isRepick(pick, author=None):
@@ -107,10 +107,10 @@ class App(seiscomp.client.Application):
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
 
-        # we need the config to determine which streams are used for picking
+        # We need the config to determine which streams are used for picking
         self.setLoadConfigModuleEnabled(True)
 
-        # we want to stream waveform data and save the raw records
+        # We want to stream waveform data and save the raw records
         self.setRecordStreamEnabled(True)
         # self.setRecordInputHint(seiscomp.core.Record.SAVE_RAW)
 
@@ -204,11 +204,6 @@ class App(seiscomp.client.Application):
         if self.commandline().hasOption("messaging-group"):
             self.targetMessagingGroup = self.commandline().optionString("messaging-group")
 
-        # TODO
-        # ignored-authors
-        # ignored-agencies
-        # empty-origin-agencies
-
         self.setMessagingEnabled(False)
         if not self.commandline().hasOption("event"):
             # not in event mode -> configure the messaging
@@ -283,10 +278,6 @@ class App(seiscomp.client.Application):
         seiscomp.datamodel.Notifier.Enable()
         for pickID in pickIDs:
             pick = picks[pickID]
-            # It is essential to first add the pick to the
-            # EventParameters and then the comments to the pick.
-            # This is why readRepickerResults returns picks and
-            # comments separately.
             ep.add(pick)
             if pickID in comments:
                 for comment in comments[pickID]:
@@ -364,7 +355,6 @@ class App(seiscomp.client.Application):
             loc = location.code()
             cha =   stream.code()
             cha = cha[:2]
-            # nslc = (net, sta, loc, cha)
             if (net, sta) in net_sta_blacklist:
                 continue
             if (net, sta, "--" if loc == "" else loc, cha) \
@@ -383,7 +373,6 @@ class App(seiscomp.client.Application):
             timestamp = time.toString("%Y%m%d.%H%M%S.%f000000")[:18]
             pickID = timestamp + "-PRE-%s.%s.%s.%s" % (net, sta, loc, cha)
             if seiscomp.datamodel.Pick.Find(pickID):
-                # FIXME HACK FIXME
                 continue
             predictedPick = seiscomp.datamodel.Pick(pickID)
             phase = seiscomp.datamodel.Phase()
@@ -409,10 +398,10 @@ class App(seiscomp.client.Application):
             d.mkdir(parents=True, exist_ok=True)
 
     def _loadEvent(self, publicID):
-        return _dbutil.loadEvent(self.query(), publicID)
+        return _dbutil.loadEvent(self.query(), publicID, full=True)
 
     def _loadOrigin(self, publicID):
-        return _dbutil.loadOrigin(self.query(), publicID)
+        return _dbutil.loadOrigin(self.query(), publicID, full=False)
 
     def _loadWaveformsForPicks(self, picks, event):
         request = dict()
@@ -436,7 +425,6 @@ class App(seiscomp.client.Application):
             key = "%s.%s.%s.%s" % (net, sta, loc, cha)
             mseedFileName = self.eventRootDir / eventID / (key + ".mseed")
             if mseedFileName.exists():
-                # TODO: Check data completeness, otherwise do request
                 continue
 
             t0 = pick.time().value()
@@ -499,7 +487,6 @@ class App(seiscomp.client.Application):
                     gappyStreams.append(streamID)
             for streamID in gappyStreams:
                 seiscomp.logging.warning("Gappy stream "+streamID+" ignored")
-# TEMP          del waveforms[streamID]
 
         return waveforms
 
@@ -618,7 +605,6 @@ class App(seiscomp.client.Application):
         associated_picks = []
         objects = self.query().getPicks(originID)
         if not objects:
-            # FIXME: temp
             seiscomp.logging.debug("no results from getPicks")
         for obj in objects:
             pick = seiscomp.datamodel.Pick.Cast(obj)
@@ -724,7 +710,6 @@ class App(seiscomp.client.Application):
         # #########################################################
 
         if origin.creationInfo().agencyID() in emptyOriginAgencyIDs:
-            # TODO: Make this distance magnitude dependent
             maxDelta = 105.
         else:
             # The goal here is to limit the maximum distance to a
@@ -759,7 +744,6 @@ class App(seiscomp.client.Application):
                 maxDelta = 105
 
         if self.pickingConfig.tryUpickedStations:
-            # TODO: delay
             predictedPicks = self.findUnpickedStations(
                 workspace.origin, maxDelta, workspace.all_picks)
             seiscomp.logging.debug("%d predicted picks" % len(predictedPicks))
@@ -823,7 +807,7 @@ class App(seiscomp.client.Application):
                 seiscomp.logging.debug(
                     "Event "+eventID+": no change of preferred origin")
                 return
-        origin = self._loadOrigin(originID)
+        origin = _dbutil.loadOrigin(self.query(), originID, full=True)
         self.processOrigin(origin, event)
         self.cleanup()
 

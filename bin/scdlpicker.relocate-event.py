@@ -98,47 +98,17 @@ class RelocatorApp(seiscomp.client.Application):
         return tmp
 
 
-#   def _loadEvent(self, eventID, originIDs=[]):
-#       seiscomp.logging.info("Loading event %s from database" % eventID)
-#       event = self._load(eventID, seiscomp.datamodel.Event)
-
-#       if not originIDs:
-#           originIDs = [ event.preferredOriginID() ]
-
-#       origins = []
-#       picks = {}
-#       for originID in originIDs:
-
-#           origin = self._load(originID, seiscomp.datamodel.Origin)
-#           origins.append(origin)
-
-#           #### Not needed:
-#           # self.query().loadArrivals(origin)
-
-#           seiscomp.logging.info("Loading corresponding picks")
-#           for arr in _util.ArrivalIterator(origin):
-#               pid = arr.pickID()
-#               if pid in picks:
-#                   continue
-#               obj = self._load(pid, seiscomp.datamodel.Pick)
-#               picks[pid] = obj
-#           seiscomp.logging.info("Loaded %d picks" % len(picks))
-
-#           seiscomp.logging.info("Loading completed")
-#       return event, origins, picks
-
     def processEvent(self, eventID):
         seiscomp.logging.info("Working on event "+eventID)
 
-        event  = _dbutil.loadEvent(self.query(), eventID)
-        origin = _dbutil.loadOriginWithoutArrivals(
-            self.query(), event.preferredOriginID())
+        event  = _dbutil.loadEvent(self.query(), eventID, full=True)
+        origin = _dbutil.loadOrigin(self.query(), event.preferredOriginID(), full=False)
 
         # Load all picks for a matching time span, independent of their
         # association.
         origin, picks = _dbutil.loadPicksForOrigin(
-            origin, self.inventory, self.allowedAuthorIDs,
-            self.maxDelta, self.query())
+            self.query(),
+            origin, self.inventory, self.allowedAuthorIDs, self.maxDelta)
 
         relocated = _relocation.relocate(
             origin, eventID, self.fixedDepth,

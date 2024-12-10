@@ -231,9 +231,6 @@ def summarize(obj, withPicks=False):
     print("  Arr all   %d" % countAll)
     print("  Pha count %d" % obj.quality().usedPhaseCount())
 
-    # FIXME: usedStationCount and standardError are currently sometimes
-    #        adopted from the seeding origin
-    # TODO:  ensure usedStationCount and standardError are always computed
     try:
         print("  Sta count %d" % obj.quality().usedStationCount())
     except ValueError:
@@ -297,11 +294,10 @@ def manual(obj):
 
 
 def qualified(origin):
-    # Check whether an origin meets certain criteria.
-    #
-    # This is work in progress and currently very specific to
-    # the global monitoring at GFZ. In other contexts this test
-    # may have to be adapted or skipped.
+    """
+    Check whether an origin meets certain criteria.
+
+    """
 
     if manual(origin):
         return True
@@ -334,7 +330,6 @@ def clearAutomaticArrivals(origin):
             continue
         origin.removeArrival(pos)
 
-    # logging
     for arr in ArrivalIterator(origin):
         phase = arr.phase().code()
         pickID = arr.pickID()
@@ -374,7 +369,6 @@ def configuredStreams(configModule, myName):
 
     # loop over all configured stations
     for i in range(configModule.configStationCount()):
-        # config for one station
         cfg = configModule.configStation(i)
 
         net, sta = cfg.networkCode(), cfg.stationCode()
@@ -394,10 +388,7 @@ def configuredStreams(configModule, myName):
             seiscomp.logging.debug("no params found")
             continue
 
-        # search for "detecStream" and "detecLocid"
         detecStream, detecLocid = None, ""
-        # We cannot look them up by name, therefore need
-        # to check all available parameters.
         for k in range(params.parameterCount()):
             param = params.parameter(k)
             seiscomp.logging.debug(
@@ -408,11 +399,9 @@ def configuredStreams(configModule, myName):
             elif param.name() == "detecLocid":
                 detecLocid = param.value()
         if not detecStream:
-            # ignore stations without detecStream
             seiscomp.logging.debug("no detecStream found")
             continue
 
-        # this may fail for future FDSN stream names
         if detecLocid == "":
             detecLocid = "--"
         item = (net, sta, detecLocid, detecStream[:2])
@@ -471,13 +460,11 @@ def readRepickerResults(path):
         # Note that the repicker module may have produced more
         # than one repick per original pick. We pick the one
         # with the larger confidence value. Later on we may also
-        # use the other picks e.g. as depth phases. Currently we
-        # don't do that but it's a TODO item.
+        # use the other picks e.g. as depth phases.
 
         for p in yaml.safe_load(yamlfile):
             pickID = p["publicID"]
             if seiscomp.datamodel.Pick.Find(pickID):
-                # FIXME HACK FIXME
                 seiscomp.logging.debug("FIXME: "+pickID)
             time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
             tq = seiscomp.datamodel.TimeQuantity()
@@ -564,3 +551,35 @@ def gappy(waveforms, tolerance=0.5):
                 gapCount += 1
         prev = rec
     return gapCount
+
+
+def filterObjects(objects, authorWhitelist=None, agencyWhitelist=None):
+
+    def inrange(obj):
+        try:
+            c = obj.creationInfo()
+        except ValueError:
+            return False
+
+        if authorWhitelist is not None and c.author() not in authorWhitelist:
+            return False
+
+        if agencyWhitelist is not None and c.agencyID() not in agencyWhitelist:
+            return False
+
+        return True
+
+    def inrange_dict(item):
+        key, obj = item
+        return inrange(obj)
+
+    def inrange_list(item):
+        return inrange(item)
+
+    if isinstance(objects, dict):
+        filtered = filter(inrange_dict, objects.items())
+    else:
+        filtered = filter(inrange_list, objects)
+
+    return type(objects)(filtered)
+
