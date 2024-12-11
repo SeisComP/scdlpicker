@@ -6,7 +6,7 @@ module_name = "scdlpicker"
 setup(
     name='scdlpicker',
 
-    version="0.3.4",
+    version="0.4.0",
 
     description="scdlpicker: A Python package to enable seismic phase picking based on deep-learning in SeisComP",
 
@@ -32,10 +32,10 @@ setup(
     },
 
     scripts=[
-        "bin/scdlpicker.client.py",
-        "bin/scdlpicker.repicker.py",
-        "bin/scdlpicker.relocate-event.py",
-        "bin/scdlpicker.online-relocator.py",
+        "bin/scdlpicker-client.py",
+        "bin/scdlpicker-repicker.py",
+        "bin/scdlpicker-relocate-event.py",
+        "bin/scdlpicker-online-relocator.py",
         "bin/scexec"
     ]
 )
