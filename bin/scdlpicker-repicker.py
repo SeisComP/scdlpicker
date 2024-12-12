@@ -71,7 +71,7 @@ def timestamp(t):
     return (t.isoformat() + "000000")[:23] + "Z"
 
 
-class RepickerApp(seiscomp.client.Application):
+class App(seiscomp.client.Application):
     """A class to hold settings and provide methods for arbitrary seisbench
     compatible P wave pickers.
 
@@ -101,9 +101,6 @@ class RepickerApp(seiscomp.client.Application):
     """
 
     def __init__(self, argc, argv):
-        argv = argv.copy()
-        argv[0] = "scdlpicker"
-
         super().__init__(argc, argv)
         self.setDatabaseEnabled(False, False)
         self.setLoadInventoryEnabled(False)
@@ -139,7 +136,7 @@ class RepickerApp(seiscomp.client.Application):
         return True
 
     def init(self):
-        if not super(RepickerApp, self).init():
+        if not super().init():
             return False
 
         self.commonConfig = _config.getCommonConfig(self)
@@ -205,15 +202,22 @@ class RepickerApp(seiscomp.client.Application):
             waveformsDir = self.eventRootDir / eventID / "waveforms"
 
             files = []
+            foundComponents = []
             for components in [("Z",), ("N", "1"), ("E", "2")]:
                 for c in components:
                     file = waveformsDir / (nslc + c + ".mseed")
                     if file.exists():
+                        foundComponents.append(c)
                         break
                 else:
                     file = None
                 if file:
                     files.append(file)
+
+            if len(files) == 1 and "Z" in foundComponents:
+                files.append(files[0])
+                files.append(files[0])
+                seiscomp.logging.debug("!!!! replacing missing horizontals by vertical component")
 
             if len(files) < 3:
                 seiscomp.logging.debug("---- " + pickID)
@@ -618,7 +622,7 @@ class RepickerApp(seiscomp.client.Application):
 
 
 def main():
-    app = RepickerApp(len(sys.argv), sys.argv)
+    app = App(len(sys.argv), sys.argv)
     app()
 
 
