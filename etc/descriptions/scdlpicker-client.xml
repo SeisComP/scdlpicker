@@ -6,7 +6,8 @@
 			<group name="scdlpicker">
 				<parameter name="workingDir" type="string" default="/tmp">
 					<description>
-						Path of the working directory where intermediate files are placed and exchanged.
+						Path of the working directory where intermediate
+						files are placed and exchanged.
 					</description>
 				</parameter>
 
@@ -22,16 +23,38 @@
 					</description>
 				</parameter>
 
+				<parameter name="ignoredAuthors" type="list:string">
+					<description>
+						Ignore picks or origins from the listed authors.
+					</description>
+				</parameter>
+
+				<parameter name="ignoredAgencies" type="list:string">
+					<description>
+						Ignore picks or origins from the listed agencies.
+					</description>
+				</parameter>
+
+				<parameter name="emptyOriginAgencyIDs" type="list:string">
+					<description>
+						Trigger processing for 'empty' origins (i.e. without
+						arrivals) of the listed agencies. Experimental.
+					</description>
+				</parameter>
+
 				<group name="repicking">
 					<parameter name="tryUnpickedStations" type="bool" default="false">
 						<description>
-							Try to pick stations for which there is no existing automatic pick.
+							Try to pick stations for which there is no
+							existing automatic pick.
 						</description>
 					</parameter>
 
 					<parameter name="repickManualPicks" type="bool" default="false">
 						<description>
-							Repick manual picks? This is normally not needed but may be activated to e.g. compare picking performance.
+							Repick manual picks? This is normally not
+							needed but may be activated to e.g. compare
+							picking performance.
 						</description>
 					</parameter>
 

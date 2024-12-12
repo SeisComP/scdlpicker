@@ -96,14 +96,11 @@ def isRepick(pick, author=None):
 class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
-        argv = argv.copy()
-        argv[0] = "scdlpicker"
-
+        super().__init__(argc, argv)
         self.ignoredAuthors = ignoredAuthors
         self.ignoredAgencyIDs = ignoredAgencyIDs
         self.emptyOriginAgencyIDs = emptyOriginAgencyIDs
 
-        super().__init__(argc, argv)
         self.setDatabaseEnabled(True, True)
         self.setLoadInventoryEnabled(True)
 
@@ -127,7 +124,7 @@ class App(seiscomp.client.Application):
     def initConfiguration(self):
         # Called before validateParameters()
 
-        if not super(App, self).initConfiguration():
+        if not super().initConfiguration():
             return False
 
         try:
@@ -198,7 +195,7 @@ class App(seiscomp.client.Application):
         """
         Command-line parameters
         """
-        if not super(App, self).validateParameters():
+        if not super().validateParameters():
             return False
 
         if self.commandline().hasOption("messaging-group"):
@@ -216,7 +213,7 @@ class App(seiscomp.client.Application):
         return True
 
     def init(self):
-        if not super(App, self).init():
+        if not super().init():
             return False
 
         self.commonConfig = _config.getCommonConfig(self)
@@ -830,7 +827,7 @@ class App(seiscomp.client.Application):
         self.enableTimer(timeoutInterval)
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(False)
 
-        return super(App, self).run()
+        return super().run()
 
 
 def main():

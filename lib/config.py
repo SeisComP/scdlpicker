@@ -65,9 +65,10 @@ class PickingConfig:
         self.beforeP = 60
         self.afterP = 60.
 
+        # Try to pick stations for which there is no existing automatic pick.
         self.tryUpickedStations = True
 
-        # Ignore manual picks, i.e. don't repick them.
+        # Repick manual picks? This is normally not needed but may be activated to e.g. compare picking performance.
         self.repickManualPicks = False
 
         self.minConfidence = 0.4
@@ -109,7 +110,7 @@ class RelocationConfig:
         # solution.
         self.maxResidual = 2.5
 
-        # Maximum residual RMS.
+        # Maximum residual RMS
         self.maxRMS = 1.7
 
         # Maximum epicentral distance in degrees for a pick to be used in a location

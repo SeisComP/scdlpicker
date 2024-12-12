@@ -296,7 +296,6 @@ def manual(obj):
 def qualified(origin):
     """
     Check whether an origin meets certain criteria.
-
     """
 
     if manual(origin):

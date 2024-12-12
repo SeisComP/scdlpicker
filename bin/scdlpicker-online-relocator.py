@@ -58,10 +58,7 @@ def getFixedDepth(origin):
 class App(seiscomp.client.Application):
 
     def __init__(self, argc, argv):
-        argv = argv.copy()
-        argv[0] = "scdlpicker"
-
-        super(App, self).__init__(argc, argv)
+        super().__init__(argc, argv)
 
         self.setMessagingEnabled(True)
         self.setDatabaseEnabled(True, True)
@@ -88,7 +85,7 @@ class App(seiscomp.client.Application):
         self._previousPingDB = now
 
     def createCommandLineDescription(self):
-        super(App, self).createCommandLineDescription()
+        super().createCommandLineDescription()
 
         self.commandline().addGroup("Config")
         self.commandline().addStringOption(
@@ -122,17 +119,19 @@ class App(seiscomp.client.Application):
             "Target", "test", "test mode - don't send the result")
 
     def init(self):
-        if not super(App, self).init():
+        if not super().init():
             return False
 
         self.commonConfig = _config.getCommonConfig(self)
         self.workingDir = self.commonConfig.workingDir
 
-        _depth.initDepthModel(device=self.commonConfig.device)
-
         self.relocationConfig = _config.getRelocationConfig(self)
 
         self.inventory = seiscomp.client.Inventory.Instance().inventory()
+
+        self.dumpConfiguration()
+
+        _depth.initDepthModel(device=self.commonConfig.device)
 
         return True
 
@@ -445,7 +444,6 @@ class App(seiscomp.client.Application):
         self.commonConfig.dump(info)
 
     def run(self):
-        self.dumpConfiguration()
 
         seiscomp.datamodel.PublicObject.SetRegistrationEnabled(True)
 
@@ -472,7 +470,7 @@ class App(seiscomp.client.Application):
 
         # enter online mode
         self.enableTimer(1)
-        return super(App, self).run()
+        return super().run()
 
 
 if __name__ == "__main__":
