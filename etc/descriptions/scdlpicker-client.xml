@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<seiscomp>
+	<module name="scdlpicker-client" category="Processing">
+		<description>Deep-learning repicker - SeisComP client</description>
+		<configuration>
+			<group name="scdlpicker">
+				<parameter name="workingDir" type="string" default="/tmp">
+					<description>
+						Path of the working directory where intermediate files are placed and exchanged.
+					</description>
+				</parameter>
+
+				<parameter name="earthModel" type="string" default="iasp91">
+					<description>
+						Either iasp91 or ak135.
+					</description>
+				</parameter>
+
+				<parameter name="stationBlacklist" type="list:string">
+					<description>
+						Comma separated list of stations not to be used.
+					</description>
+				</parameter>
+
+				<group name="repicking">
+					<parameter name="tryUnpickedStations" type="bool" default="false">
+						<description>
+							Try to pick stations for which there is no existing automatic pick.
+						</description>
+					</parameter>
+
+					<parameter name="repickManualPicks" type="bool" default="false">
+						<description>
+							Repick manual picks? This is normally not needed but may be activated to e.g. compare picking performance.
+						</description>
+					</parameter>
+
+					<parameter name="targetMessagingGroup" type="string" default="MLTEST">
+						<description>
+							Send generated objects to this messaging group.
+						</description>
+					</parameter>
+
+					<parameter name="pickAuthor" type="string" default="dlpicker">
+						<description>
+							The author ID that all new picks will have
+						</description>
+					</parameter>
+				</group>
+			</group>
+		</configuration>
+	</module>
+</seiscomp>

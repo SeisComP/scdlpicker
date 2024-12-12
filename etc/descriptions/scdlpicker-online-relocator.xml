@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<seiscomp>
+	<module name="scdlpicker-online-relocator" category="Processing">
+		<description>Deep-learning repicker</description>
+		<configuration>
+			<group name="scdlpicker">
+				<parameter name="workingDir" type="string" default="/tmp">
+					<description>
+						Path of the working directory where intermediate files are placed and exchanged.
+					</description>
+				</parameter>
+
+				<parameter name="device" type="string" default="cpu">
+					<description>
+						Either cpu or gpu.
+					</description>
+				</parameter>
+
+				<parameter name="earthModel" type="string" default="iasp91">
+					<description>
+						Either iasp91 or ak135.
+					</description>
+				</parameter>
+
+				<parameter name="stationBlacklist" type="list:string">
+					<description>
+						Comma separated list of stations not to be used.
+					</description>
+				</parameter>
+
+				<group name="relocation">
+					<parameter name="minDelay" type="double" default="1200">
+						<description>
+							Time delay (in seconds) before first relocation.
+						</description>
+					</parameter>
+
+					<parameter name="minDepth" type="double" default="10">
+						<description>
+							The minimum depth for a relocation. If the
+							locator locates the depth shallower than
+							this depth, the depth is fixed at this
+							value.
+						</description>
+					</parameter>
+
+					<parameter name="maxRMS" type="double" default="1.7">
+						<description>
+							Maximum residual RMS
+						</description>
+					</parameter>
+
+					<parameter name="maxResidual" type="double" default="2.5">
+						<description>
+							Maximum residual of any individual pick. The
+							relocator will attempt to exclude arrivals
+							with larger residuals from the solution.
+						</description>
+					</parameter>
+
+					<parameter name="maxDelta" type="double" default="105">
+						<description>
+							Maximum epicentral distance in degrees for a
+							pick to be used in a location
+						</description>
+					</parameter>
+
+					<parameter name="pickAuthors" type="string">
+						<description>
+							List of allowed pick authors
+						</description>
+					</parameter>
+				</group>
+			</group>
+		</configuration>
+	</module>
+</seiscomp>

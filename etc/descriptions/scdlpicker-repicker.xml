@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<seiscomp>
+	<module name="scdlpicker-repicker" category="Processing">
+		<description>Deep-learning repicker</description>
+		<configuration>
+			<group name="scdlpicker">
+				<parameter name="workingDir" type="string" default="/tmp">
+					<description>
+						Path of the working directory where intermediate files are placed and exchanged.
+					</description>
+				</parameter>
+
+				<parameter name="device" type="string" default="cpu">
+					<description>
+						Either cpu or gpu.
+					</description>
+				</parameter>
+
+				<parameter name="earthModel" type="string" default="iasp91">
+					<description>
+						Either iasp91 or ak135.
+					</description>
+				</parameter>
+
+				<parameter name="stationBlacklist" type="list:string">
+					<description>
+						Comma separated list of stations not to be used.
+					</description>
+				</parameter>
+
+				<group name="repicking">
+					<parameter name="model" type="string" default="eqtransformer">
+						<description>
+							Model used for repicking. Must be supported by SeisBench.
+						</description>
+					</parameter>
+
+					<parameter name="dataset" type="string" default="geofon">
+						<description>
+							Data set used for repicking
+						</description>
+					</parameter>
+
+					<parameter name="minConfidence" type="double" default="0.4">
+						<description>
+							Minimum confidence for an annotation to be declared a pick
+						</description>
+					</parameter>
+
+					<parameter name="batchSize" type="int" default="1">
+						<description>
+							Repicking can be done in batches for speed. Specify the batch size here.
+						</description>
+					</parameter>
+				</group>
+			</group>
+		</configuration>
+	</module>
+</seiscomp>
