@@ -765,23 +765,9 @@ class App(seiscomp.client.Application):
         # read them as miniSEED files into ObsPy. This
         # is the SeisComP-to-ObsPy iterface so to say.
         workspace.dump(eventRootDir=self.eventRootDir, spoolDir=self.spoolDir)
-
-        # determine streams for which we don't have 3 components
-        streamIDs = dict()
-        for streamID in workspace.waveforms:
-            firstRecord = workspace.waveforms[streamID][0]
-            net, sta, loc, cha = _util.nslc(firstRecord)
-            if (net, sta, loc) not in streamIDs:
-                streamIDs[(net, sta, loc)] = []
-            streamIDs[(net, sta, loc)].append(streamID)
-
-        # for each complete NSL stream there should be 3 streamID's
-        for nsl in streamIDs:
-            if len(streamIDs[nsl]) < 3:
-                for streamID in streamIDs[nsl]:
-                    del workspace.waveforms[streamID]
-                    seiscomp.logging.warning(
-                        "Incomplete stream "+streamID+" ignored")
+        # Note that at this point the data may still be incomplete,
+        # e.g. missing components, gappy traces etc.
+        # The handling of such anomalous data shall be the repicker's task.
 
     def processEvent(self, event):
         """
