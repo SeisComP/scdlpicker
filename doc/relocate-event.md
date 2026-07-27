@@ -1,8 +1,8 @@
 # Relocate an event based on DL picks only
 
-There is a utility `scdlpicker.relocate-event.py` which is more of a proof of concept but can be used to load DL picks from the database and perform a relocation based on *only* these picks.
+The utility `scdlpicker.relocate-event.py` is a proof-of-concept relocation module, and demonstrates the loading of DL picks from the database; however, it already works well for relocation based on *only* the DL picks. 
 
-For a global monitoring as the 24/7 monitoring of GFZ Potsdam, a default picker configuration is used that usually gives decent performance for sufficiently large event. But that default configuration is a compromise and very often there are more and usually better picks produced by the DL repicker.
+For a global monitoring as the [24/7 monitoring](https://geofon.gfz-potsdam.de/eqinfo/) of GFZ Potsdam, a default picker configuration is used within SeisComP that usually gives decent performance for sufficiently large events. But that default configuration is a compromise and very often there are more and usually better picks produced by the DL repicker.
 
 Below is an example for a magnitude 4.6 event in the Arctic Ocean. The automatic SeisComP location with the default configuration for global monitoring gave a decent location based on 34 automatic picks produced by scautopick and processed by scautoloc. Note that the residual RMS here is 1.7 seconds.
 
