@@ -446,8 +446,25 @@ def pollRepickerResults(resultsDir):
 
     return yamlfilenames
 
+def map_confidence_to_uncertainty(confidence, pickingConfig):
+    """
+    Map a confidence value between 0 and 1 to an uncertainty value in seconds.
+    This is a simple mapping that can be adjusted based on the expected
+    relationship between confidence and uncertainty for the specific model.
+    The mapping relations are defined in config.py and can be adjusted there.
+    """
+    bins = getattr(pickingConfig, "confidenceUncertaintyBins", None)
+    
+    if not bins:
+        return None
+    
+    for threshold, uncertainty in bins:
+        if confidence >= threshold:
+            return uncertainty
 
-def readRepickerResults(path):
+
+
+def readRepickerResults(path, pickingConfig):
     """
     Read repicking results from the specified YAML file.
     """
@@ -469,6 +486,22 @@ def readRepickerResults(path):
             
             tq = seiscomp.datamodel.TimeQuantity()
             tq.setValue(time)
+            conf = float(p["confidence"])
+            # Convert confidence to 0-99.99. According to the SeisComP documentation: 
+            # "Confidence level of the uncertainty, given in percent".
+            # The repicker module provides a confidence value between 0 and 1, so we multiply it by 99.99 to map
+            # it to the expected range. We use 99.99 instead of 100 to avoid any potential issues 
+            tq.setConfidenceLevel(conf*99.99)
+            
+            # Optionally map confidence to uncertainty. This is a simple mapping that can be
+            # changed in config file. The uncertainty is given in seconds and is set as the
+            # uncertainty of the pick time.
+            if pickingConfig.mapConfidenceToUncertainty:  
+                uncertainty = map_confidence_to_uncertainty(conf, pickingConfig)
+                if uncertainty is not None:
+                    tq.setUncertainty(uncertainty)
+            
+            
             net = p["networkCode"]
             sta = p["stationCode"]
             loc = p["locationCode"]

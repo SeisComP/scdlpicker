@@ -73,7 +73,15 @@ class PickingConfig:
 
         self.minConfidenceP = 0.4
         self.minConfidenceS = 0.4
-
+        
+        self.mapConfidenceToUncertainty = True
+        self.confidenceUncertaintyBins = [
+            (0.9, 0.025),
+            (0.7, 0.05),
+            (0.5, 0.1),
+            (0.0, 0.2),
+        ]
+        
         self.pickSphase = True
     
         
@@ -93,6 +101,8 @@ class PickingConfig:
         out("  repickManualPicks = " + str(self.repickManualPicks))
         out("  modelName = " + str(self.modelName))
         out("  dataset = " + str(self.dataset))
+        out("  minConfidenceP = " + str(self.minConfidenceP))
+        out("  minConfidenceS = " + str(self.minConfidenceS))
         out("  minConfidenceP = " + str(self.minConfidenceP))
         out("  minConfidenceS = " + str(self.minConfidenceS))
         out("  batchSize = " + str(self.batchSize))
@@ -233,12 +243,35 @@ def getPickingConfig(app):
 
     try:
         config.minConfidenceS = app.configGetDouble("scdlpicker.picking.minConfidenceS")
+        config.minConfidenceP = app.configGetDouble("scdlpicker.picking.minConfidenceP")
+    except RuntimeError:
+        pass
+    try:
+        config.minConfidenceP = app.commandline().optionDouble("min-confidence-p")
+    except RuntimeError:
+        pass
+
+    try:
+        config.pickSphase = app.configGetBool("scdlpicker.picking.pickSphase")
+    except RuntimeError:
+        pass
+
+    try:
+        config.minConfidenceS = app.configGetDouble("scdlpicker.picking.minConfidenceS")
     except RuntimeError:
         pass
     try:
         config.minConfidenceS = app.commandline().optionDouble("min-confidence-s")
+        config.minConfidenceS = app.commandline().optionDouble("min-confidence-s")
     except RuntimeError:
         pass
+
+    try:
+        config.mapConfidenceToUncertainty = app.configGetBool("scdlpicker.picking.mapConfidenceToUncertainty")
+    except RuntimeError:
+        pass
+
+
 
     try:
         config.beforeP = app.configGetDouble("scdlpicker.repicking.beforeP")

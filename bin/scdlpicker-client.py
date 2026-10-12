@@ -306,7 +306,7 @@ class App(seiscomp.client.Application):
         repickerResults = _util.pollRepickerResults(self.outgoingDir)
         if repickerResults:
             for yamlfile in repickerResults:
-                picks, comments = _util.readRepickerResults(yamlfile)
+                picks, comments = _util.readRepickerResults(yamlfile, self.pickingConfig)
                 if self.sendRepickerResults(picks, comments):
                     sent = self.sentDir / yamlfile.name
                     yamlfile.rename(sent)
